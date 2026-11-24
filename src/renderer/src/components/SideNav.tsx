@@ -7,14 +7,17 @@ interface SideNavProps {
   onPrev: () => void
   onNext: () => void
   visible: boolean
+  /** True when the slide behind the chrome is light, so the chrome inverts. */
+  dark: boolean
 }
 
-export function SideNav({ pageIndex, pageCount, side, onPrev, onNext, visible }: SideNavProps) {
+export function SideNav({ pageIndex, pageCount, side, onPrev, onNext, visible, dark }: SideNavProps) {
   return (
     <div
       className="side-nav"
       data-side={side}
       data-visible={visible}
+      data-dark={dark}
       data-testid={`side-nav-${side}`}
     >
       <button

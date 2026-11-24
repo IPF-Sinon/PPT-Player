@@ -30,6 +30,7 @@ export default function PlaybackPage() {
   const [pendingDigits, setPendingDigits] = useState('')
   const [loop, setLoop] = useState(false)
   const [ratio, setRatio] = useState(16 / 9)
+  const [firstFramePainted, setFirstFramePainted] = useState(false)
   const [lens, setLens] = useState<{ x: number; y: number } | null>(null)
 
   const frameRef = useRef<HTMLDivElement | null>(null)
@@ -165,6 +166,7 @@ export default function PlaybackPage() {
       canvas.style.height = '100%'
       const ctx = canvas.getContext('2d')
       ctx?.drawImage(bitmap.canvas, 0, 0)
+      setFirstFramePainted(true)
 
       // Sample a corner so the chrome can invert over light decks.
       try {
@@ -375,7 +377,7 @@ export default function PlaybackPage() {
         onMouseLeave={() => setLens(null)}
         role="presentation"
       >
-        <div className="slide-frame" style={{ aspectRatio: String(ratio) }}>
+        <div className="slide-frame" data-painted={firstFramePainted} style={{ aspectRatio: String(ratio) }}>
           <canvas ref={canvasRef} data-testid="playback-canvas" />
           <InkLayer
             width={frameRef.current?.clientWidth ?? 1280}
@@ -419,6 +421,7 @@ export default function PlaybackPage() {
         onPrev={prev}
         onNext={next}
         visible={chromeVisible}
+        dark={dark}
       />
       <SideNav
         side="right"
@@ -427,6 +430,7 @@ export default function PlaybackPage() {
         onPrev={prev}
         onNext={next}
         visible={chromeVisible}
+        dark={dark}
       />
 
       <PlayToolbar
