@@ -116,14 +116,23 @@ test('6. keyboard navigation advances and rewinds', async () => {
 
 test('7. both side nav stacks are clickable', async () => {
   expect(playback).not.toBeNull()
-  await playback!.getByTestId('side-next-right').click()
+
+  // The chrome fades out after 2.5s of inactivity; a real user moves the mouse
+  // first, which is what makes the nav interactive again.
+  await playback!.mouse.move(640, 360)
+  const nextRight = playback!.getByTestId('side-next-right')
+  await expect(nextRight).toHaveCSS('opacity', '1')
+  await nextRight.click()
   await expect(playback!.getByTestId('side-page-right')).toHaveText('3/3')
+
+  await playback!.mouse.move(640, 360)
   await playback!.getByTestId('side-prev-left').click()
   await expect(playback!.getByTestId('side-page-left')).toHaveText('2/3')
 })
 
 test('8. blackout hides the slide and any click restores it', async () => {
   expect(playback).not.toBeNull()
+  await playback!.mouse.move(640, 360)
   await playback!.getByTestId('tool-blackout').click()
   await expect(playback!.getByTestId('playback-page')).toHaveAttribute('data-blackout', 'true')
   await playback!.screenshot({ path: join(shots, 'playback-blackout.png') })
@@ -135,6 +144,7 @@ test('8. blackout hides the slide and any click restores it', async () => {
 
 test('9. the pen tool records ink on the slide', async () => {
   expect(playback).not.toBeNull()
+  await playback!.mouse.move(640, 360)
   await playback!.getByTestId('tool-pen').click()
   const layer = playback!.getByTestId('ink-layer')
   await expect(layer).toBeVisible()
