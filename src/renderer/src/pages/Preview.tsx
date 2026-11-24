@@ -8,6 +8,7 @@ import { RenderQueue } from '../lib/render'
 import { ThumbRail } from '../components/ThumbRail'
 import { SlideStage } from '../components/SlideStage'
 import { ChevronDown, ChevronUp, Close, Folder, Info, Minus, Play, Plus, Settings, Trash } from '../components/icons'
+import { HelpSheet, SettingsSheet } from '../components/Sheets'
 import '../styles/preview.css'
 
 export default function PreviewPage() {
@@ -15,6 +16,8 @@ export default function PreviewPage() {
   const [recent, setRecent] = useState<string[]>([])
   const [zoom, setZoom] = useState(1)
   const [dragOver, setDragOver] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const queue = useMemo(() => new RenderQueue(), [])
   const openToken = useRef(0)
 
@@ -148,7 +151,14 @@ export default function PreviewPage() {
           <i />
           {store.engine?.available ? zh.engine.bundled : zh.engine.none}
         </span>
-        <button type="button" className="icon-btn" title={zh.common.help} aria-label={zh.common.help}>
+        <button
+          type="button"
+          className="icon-btn"
+          title={zh.common.help}
+          aria-label={zh.common.help}
+          data-testid="open-help"
+          onClick={() => setHelpOpen(true)}
+        >
           <Info size={17} />
         </button>
         <button
@@ -157,6 +167,7 @@ export default function PreviewPage() {
           title={zh.common.settings}
           aria-label={zh.common.settings}
           data-testid="open-settings"
+          onClick={() => setSettingsOpen(true)}
         >
           <Settings size={17} />
         </button>
@@ -368,6 +379,15 @@ export default function PreviewPage() {
           </button>
         </div>
       </footer>
+
+      <SettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={() => {
+          void refreshEngine()
+        }}
+      />
+      <HelpSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   )
 }

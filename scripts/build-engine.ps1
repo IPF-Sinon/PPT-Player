@@ -35,11 +35,38 @@ if (Test-Path $adminDir) { Remove-Item -Recurse -Force $adminDir }
 New-Item -ItemType Directory -Force -Path $adminDir | Out-Null
 
 Write-Host "Extracting MSI into $adminDir"
-& msiexec.exe /a $msiPath /qn "TARGETDIR=$adminDir"
-if ($LASTEXITCODE -ne 0) { throw "msiexec /a failed with exit code $LASTEXITCODE" }
+$msiLog = Join-Path $WorkDir 'msiexec.log'
+if (Test-Path $msiLog) { Remove-Item -Force $msiLog }
 
-$sofficeHit = Get-ChildItem -Path $adminDir -Recurse -Filter 'soffice.com' -File | Select-Object -First 1
-if (-not $sofficeHit) { throw 'soffice.com not found in administrative install tree' }
+# msiexec detaches from the caller, so it must be waited on explicitly.
+$q = [char]34
+$msiArgs = @(
+  '/a',
+  ($q + $msiPath + $q),
+  '/qn',
+  '/l*v',
+  ($q + $msiLog + $q),
+  ('TARGETDIR=' + $q + $adminDir + $q)
+)
+$proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow
+Write-Host "msiexec exit code: $($proc.ExitCode)"
+if ($proc.ExitCode -ne 0) {
+  if (Test-Path $msiLog) { Get-Content $msiLog -Tail 40 }
+  throw "msiexec /a failed with exit code $($proc.ExitCode)"
+}
+
+$extracted = @(Get-ChildItem -Path $adminDir -Recurse -File -ErrorAction SilentlyContinue)
+Write-Host "extracted files: $($extracted.Count)"
+if ($extracted.Count -eq 0) {
+  if (Test-Path $msiLog) { Get-Content $msiLog -Tail 60 }
+  throw "administrative install produced no files in $adminDir"
+}
+
+$sofficeHit = $extracted | Where-Object { $_.Name -eq 'soffice.com' } | Select-Object -First 1
+if (-not $sofficeHit) {
+  $extracted | Select-Object -First 30 | ForEach-Object { Write-Host "  $($_.FullName)" }
+  throw 'soffice.com not found in administrative install tree'
+}
 $installRoot = Split-Path (Split-Path $sofficeHit.FullName -Parent) -Parent
 Write-Host "LibreOffice tree root: $installRoot"
 

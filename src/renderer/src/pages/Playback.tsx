@@ -34,6 +34,7 @@ export default function PlaybackPage() {
   const [ink, setInk] = useState<InkPage[]>([])
   const [dark, setDark] = useState(false)
   const [pendingDigits, setPendingDigits] = useState('')
+  const [loop, setLoop] = useState(false)
   const [frame, setFrame] = useState<FrameSize>({ width: 0, height: 0, dpr: 1 })
   const [lens, setLens] = useState<{ x: number; y: number } | null>(null)
 
@@ -58,10 +59,18 @@ export default function PlaybackPage() {
     (next: number): void => {
       if (pageCount === 0) return
       if (next < 0) {
+        if (loop) {
+          setPageIndex(pageCount - 1)
+          return
+        }
         showToast(zh.playback.startOfDeck)
         return
       }
       if (next > pageCount - 1) {
+        if (loop) {
+          setPageIndex(0)
+          return
+        }
         showToast(zh.playback.endOfDeck)
         return
       }
@@ -69,7 +78,7 @@ export default function PlaybackPage() {
       setLens(null)
       pokeChrome()
     },
-    [pageCount, pokeChrome, showToast]
+    [loop, pageCount, pokeChrome, showToast]
   )
 
   const next = useCallback(() => goTo(pageIndex + 1), [goTo, pageIndex])
@@ -98,6 +107,8 @@ export default function PlaybackPage() {
       setPageIndex(Math.min(ctx.pageIndex, Math.max(0, doc.numPages - 1)))
       const saved = await window.api.loadInk(ctx.deckId)
       if (!cancelled) setInk(saved)
+      const settings = await window.api.getSettings()
+      if (!cancelled) setLoop(settings.loopPlayback)
       document.title = zh.windowTitle(info.sourcePath.split(/[\\/]/).pop() ?? '')
     }
     void boot()
