@@ -36,13 +36,37 @@
 - Windows 10 1809 及以上 / Windows 11，x64
 - 无需安装 Office、无需安装 LibreOffice（引擎内置）
 - 需要可写的用户数据目录（缓存与设置）
-## 实测产物
+## 引擎裁剪
 
-在 GitHub Actions `windows-latest` 上实测（LibreOffice 25.8.7，裁剪后引擎约 1.0 GB 解包体积）：
+安装包体积几乎全部来自内置的 LibreOffice。裁剪不凭经验删文件，而是
+**每个候选文件都做一次真实转换验证**：删掉 → 跑一次 pptx→PDF → 失败就还原。
+日志记录哪些被删、哪些被保留。
+
+实测（LibreOffice 25.8.7，administrative install）：
+
+| 阶段 | 解包体积 |
+| --- | --- |
+| 原始 | 1,500 MB |
+| 去掉文档 / 安装包残留 | 1,470 MB |
+| 去掉图标主题 | 1,399 MB |
+| 去掉模板 / 向导 / Basic | 1,365 MB |
+| 去掉 89 MB 非中英本地化资源 | 1,012 MB |
+| 去掉非拉丁字体 | 1,003 MB |
+| 逐个探测模块与可选组件 | **407 MB** |
+
+**必须保留**（删掉即转换失败，已由探测确认）：`share/config/soffice.cfg`、
+`pdfiumlo.dll`、`mwaw.dll`、`wps.dll`、`etonyek.dll`、`CoinMP.dll`。
+即使是无头导出，LibreOffice 也会在初始化组件上下文时加载它们。
+
+**可以安全删除**：Calc / Writer / Base / Math 模块、Python 运行时、
+`xpdfimport.exe`、Java classes、字典扩展、模板与向导。
+
+## 实测产物
 
 | 产物 | 体积 |
 | --- | --- |
-| `PPTPlayer-Setup-0.1.0-x64.exe`（NSIS 安装版） | 319.7 MB |
-| `PPTPlayer-0.1.0-x64.zip`（免安装版） | 404.5 MB |
+| 引擎 zip（压缩后） | 130.3 MB |
+| `PPTPlayer-Setup-*-x64.exe`（NSIS 安装版） | 待测 |
+| `PPTPlayer-*-x64.zip`（免安装版） | 待测 |
 
-安装包体积预算是 600 MB，CI 会在超出时直接失败。
+CI 在引擎 zip 超过 160 MB 时直接失败，防止裁剪回退。

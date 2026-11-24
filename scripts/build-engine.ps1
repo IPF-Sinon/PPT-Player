@@ -169,6 +169,11 @@ foreach ($stage in @('docs', 'junk', 'ui', 'authoring', 'locales', 'fonts', 'run
 # Everything below is a file or directory that *might* be load-bearing. Probe each
 # one with a real conversion and restore it when the engine stops working, so the
 # shipped tree is derived from measurement rather than assumption.
+# Measured on 25.8.7: these load-bearing files survived probing and must stay —
+#   program\mwaw.dll, program\wps.dll, program\etonyek.dll, program\CoinMP.dll,
+#   program\pdfiumlo.dll
+# LibreOffice's filter graph references them at startup, so "unused" by name is
+# not the same as unused at runtime. They are intentionally not in this list.
 $probePaths = @(
   'program\sclo.dll', 'program\scfiltlo.dll',
   'program\swlo.dll', 'program\swuilo.dll',
