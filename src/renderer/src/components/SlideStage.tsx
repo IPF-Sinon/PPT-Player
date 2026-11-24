@@ -9,6 +9,10 @@ interface SlideStageProps {
   onDoubleClick?: () => void
 }
 
+/**
+ * Renders the current slide fitted into the available box. The zoom factor
+ * multiplies the fitted size, and the holder scrolls when it no longer fits.
+ */
 export function SlideStage({ doc, pageIndex, zoom, onDoubleClick }: SlideStageProps) {
   const holderRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -57,9 +61,17 @@ export function SlideStage({ doc, pageIndex, zoom, onDoubleClick }: SlideStagePr
   if (!doc) return null
 
   return (
-    <div className="stage" ref={holderRef} onDoubleClick={onDoubleClick} data-testid="slide-stage">
-      <div className="slide-card">
-        <canvas ref={canvasRef} data-testid="slide-canvas" />
+    <div className="stage" data-testid="slide-stage">
+      <div
+        className="stage-zoom-holder"
+        data-scroll={zoom > 1}
+        ref={holderRef}
+        onDoubleClick={onDoubleClick}
+        role="presentation"
+      >
+        <div className="slide-card">
+          <canvas ref={canvasRef} data-testid="slide-canvas" />
+        </div>
       </div>
     </div>
   )

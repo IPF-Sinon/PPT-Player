@@ -78,6 +78,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Cache Electron binary
+        uses: actions/cache@v5
+        with:
+          path: ~/AppData/Local/electron/Cache
+          key: electron-45.3.4-${{ runner.os }}
+
       - run: pnpm install --frozen-lockfile
 
       - name: Generate fixtures
@@ -145,7 +151,18 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Cache Electron binary
+        uses: actions/cache@v5
+        with:
+          path: ~/AppData/Local/electron/Cache
+          key: electron-45.3.4-${{ runner.os }}
+
       - run: pnpm install --frozen-lockfile
+
+      # The Electron runtime is fetched lazily on first launch; warm it up here so
+      # the download never eats into the e2e timeout budget.
+      - name: Warm Electron binary
+        run: pnpm exec electron --version
 
       - uses: actions/download-artifact@v6
         with:

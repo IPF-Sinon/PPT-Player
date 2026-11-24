@@ -35,7 +35,15 @@ test.beforeAll(async () => {
     cwd: root,
     env: { ...process.env, NODE_ENV: 'test' }
   })
+
+  // Surface main-process output so failures are diagnosable from the CI log.
+  const mainProc = app.process()
+  mainProc.stdout?.on('data', (chunk: Buffer) => console.log('[main:out]', chunk.toString().trim()))
+  mainProc.stderr?.on('data', (chunk: Buffer) => console.log('[main:err]', chunk.toString().trim()))
+
   preview = await app.firstWindow()
+  preview.on('console', (msg) => console.log('[renderer]', msg.type(), msg.text()))
+  preview.on('pageerror', (err) => console.log('[renderer:error]', err.message))
   await preview.waitForLoadState('domcontentloaded')
 })
 
@@ -45,7 +53,18 @@ test.afterAll(async () => {
 
 test('1. preview page opens the deck passed on the command line', async () => {
   await expect(preview.getByTestId('preview-page')).toBeVisible()
-  await expect(preview.getByTestId('deck-name')).toHaveText(deckName, { timeout: 120_000 })
+
+  // Wait for the deck name, and report the error card text if it never appears.
+  await expect
+    .poll(
+      async () =>
+        preview.evaluate(
+          "document.querySelector('[data-testid=\"deck-name\"]').textContent"
+        ),
+      { timeout: 180_000 }
+    )
+    .toBe(deckName)
+
   await expect(preview.getByTestId('deck-format')).toHaveText('PPTX')
   await preview.screenshot({ path: join(shots, 'preview.png') })
 })

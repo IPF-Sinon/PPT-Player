@@ -130,10 +130,9 @@
 .stage {
   position: relative;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 28px;
+  flex: 1;
   min-width: 0;
+  min-height: 0;
   background: var(--bg-stage);
 }
 
@@ -357,4 +356,18 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+.stage-zoom-holder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 28px;
+}
+
+.stage-zoom-holder[data-scroll='true'] {
+  align-items: flex-start;
+  justify-content: flex-start;
 }
