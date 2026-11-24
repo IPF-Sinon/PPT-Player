@@ -33,6 +33,17 @@ export default function PlaybackPage() {
   const [firstFramePainted, setFirstFramePainted] = useState(false)
   const [lens, setLens] = useState<{ x: number; y: number } | null>(null)
 
+  /** Latest values the keyboard handler needs, so the listener never re-binds. */
+  const keyStateRef = useRef({
+    pageIndex: 0,
+    pageCount: 0,
+    blackout: false,
+    whiteout: false,
+    overviewOpen: false,
+    helpOpen: false,
+    pendingDigits: '',
+    loop: false
+  })
   const frameRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const idleTimer = useRef<number | null>(null)
@@ -124,6 +135,17 @@ export default function PlaybackPage() {
     }
   }, [pokeChrome])
 
+  keyStateRef.current = {
+    pageIndex,
+    pageCount,
+    blackout,
+    whiteout,
+    overviewOpen,
+    helpOpen,
+    pendingDigits,
+    loop
+  }
+
   // Keep the slide box ratio in sync with the current page.
   useEffect(() => {
     const sizes = store.deck.info?.pageSizes
@@ -205,17 +227,22 @@ export default function PlaybackPage() {
     }
   }, [store.deck.doc, pageIndex])
 
+  // One listener for the whole session: the handler reads state from a ref, so a
+  // re-render can never leave a window where keys are ignored.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
+      const state = keyStateRef.current
       pokeChrome()
+
       const key = event.key
 
-      if (blackout || whiteout) {
+      if (state.blackout || state.whiteout) {
         if (key === 'Escape') {
-          void endShow()
+          void window.api.exitPlayback()
           return
         }
-        dismissBlank()
+        setBlackout(false)
+        setWhiteout(false)
         if (key !== 'b' && key !== 'B' && key !== '.' && key !== 'w' && key !== 'W') return
       }
 
@@ -224,12 +251,19 @@ export default function PlaybackPage() {
         return
       }
 
+      const jump = (target: number): void => {
+        if (target >= 0 && target < state.pageCount) {
+          setPageIndex(target)
+          setLens(null)
+        }
+      }
+
       switch (key) {
         case 'Enter': {
-          if (pendingDigits) {
-            const target = Number(pendingDigits)
+          if (state.pendingDigits) {
+            const target = Number(state.pendingDigits)
             setPendingDigits('')
-            if (target >= 1 && target <= pageCount) goTo(target - 1)
+            if (target >= 1 && target <= state.pageCount) jump(target - 1)
           }
           event.preventDefault()
           return
@@ -241,7 +275,9 @@ export default function PlaybackPage() {
         case 'n':
         case 'N':
           event.preventDefault()
-          next()
+          if (state.pageIndex < state.pageCount - 1) jump(state.pageIndex + 1)
+          else if (state.loop) jump(0)
+          else showToast(zh.playback.endOfDeck)
           return
         case 'ArrowLeft':
         case 'ArrowUp':
@@ -249,24 +285,28 @@ export default function PlaybackPage() {
         case 'p':
         case 'P':
           event.preventDefault()
-          prev()
+          if (state.pageIndex > 0) jump(state.pageIndex - 1)
+          else if (state.loop) jump(state.pageCount - 1)
+          else showToast(zh.playback.startOfDeck)
           return
         case 'Home':
-          goTo(0)
+          event.preventDefault()
+          jump(0)
           return
         case 'End':
-          goTo(pageCount - 1)
+          event.preventDefault()
+          jump(state.pageCount - 1)
           return
         case 'Escape':
-          if (overviewOpen) {
+          if (state.overviewOpen) {
             setOverviewOpen(false)
             return
           }
-          if (helpOpen) {
+          if (state.helpOpen) {
             setHelpOpen(false)
             return
           }
-          void endShow()
+          void window.api.exitPlayback()
           return
         case 'b':
         case 'B':
@@ -298,22 +338,10 @@ export default function PlaybackPage() {
           setPendingDigits('')
       }
     }
+
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [
-    blackout,
-    dismissBlank,
-    endShow,
-    goTo,
-    helpOpen,
-    next,
-    overviewOpen,
-    pageCount,
-    pendingDigits,
-    pokeChrome,
-    prev,
-    whiteout
-  ])
+  }, [pokeChrome, showToast])
 
   const commitStroke = useCallback(
     (stroke: InkStroke): void => {
