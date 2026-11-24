@@ -420,7 +420,7 @@ export default function PlaybackPage() {
         pageCount={pageCount}
         onPrev={prev}
         onNext={next}
-        visible={chromeVisible}
+        visible={chromeVisible && !overviewOpen}
         dark={dark}
       />
       <SideNav
@@ -429,7 +429,7 @@ export default function PlaybackPage() {
         pageCount={pageCount}
         onPrev={prev}
         onNext={next}
-        visible={chromeVisible}
+        visible={chromeVisible && !overviewOpen}
         dark={dark}
       />
 
