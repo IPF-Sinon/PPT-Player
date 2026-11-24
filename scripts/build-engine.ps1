@@ -125,18 +125,62 @@ function Invoke-Smoke {
   }
 }
 
+# Non-throwing variant used to probe individual files: returns $true when the
+# engine still converts, and never lets an exception decide the outcome.
+function Test-Smoke {
+  param([string[]]$Fixtures)
+  try {
+    Invoke-Smoke -Label 'probe' -Fixtures $Fixtures
+    return $true
+  } catch {
+    Write-Host "    probe failed: $($_.Exception.Message)"
+    return $false
+  }
+}
+
 # Baseline: the untouched tree must convert before any pruning, otherwise a later
 # failure cannot be attributed to pruning.
 Write-Host 'smoke: baseline (unpruned)'
 Invoke-Smoke -Label 'baseline' -Fixtures @('smoke.pptx')
 
 # Prune in stages, verifying after each one so a regression names its own cause.
-$stages = @('docs', 'junk', 'modules', 'ui', 'authoring', 'pdfimport', 'locales', 'fonts', 'runtime')
+$stages = @('docs', 'junk', 'ui', 'authoring', 'pdfimport', 'locales', 'fonts')
 foreach ($stage in $stages) {
   & $pruneScript -InstallRoot $installRoot -Stage $stage
   Write-Host "smoke: after $stage"
   Invoke-Smoke -Label $stage -Fixtures @('smoke.pptx')
 }
+
+# Module removal is the risky part: mergedlo.dll is a monolith and some of these
+# libraries register services at startup. Test each candidate on its own and keep
+# only the ones that still convert, so the tree never ships a broken cut.
+$candidates = @(
+  'sclo.dll', 'scfiltlo.dll',
+  'swlo.dll', 'swuilo.dll', 'mswordlo.dll', 'sw_writerfilterlo.dll',
+  'Engine12.dll', 'dbaselo.dll',
+  'smlo.dll',
+  'mwaw.dll', 'wps.dll', 'etonyek.dll',
+  'CoinMP.dll'
+)
+$kept = @()
+foreach ($candidate in $candidates) {
+  $target = Join-Path $installRoot ('program\' + $candidate)
+  if (-not (Test-Path $target)) { continue }
+
+  $backup = $target + '.bak'
+  Move-Item -Path $target -Destination $backup -Force
+  if (Test-Smoke -Fixtures @('smoke.pptx')) {
+    Write-Host "  drop $candidate"
+    Remove-Item -Force $backup -ErrorAction SilentlyContinue
+    $kept += $candidate
+  } else {
+    Write-Host "  keep $candidate (conversion depends on it)"
+    Move-Item -Path $backup -Destination $target -Force
+  }
+}
+Write-Host ("modules droppable: {0}" -f ($(if ($kept.Count) { $kept -join ', ' } else { 'none' })))
+& $pruneScript -InstallRoot $installRoot -Stage 'runtime'
+& $pruneScript -InstallRoot $installRoot -Stage 'report'
 
 & $pruneScript -InstallRoot $installRoot -Stage 'report'
 
