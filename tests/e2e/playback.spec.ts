@@ -161,7 +161,9 @@ test('10. the overview grid opens and closes', async () => {
 
 test('11. Escape ends the show and returns to the preview window', async () => {
   expect(playback).not.toBeNull()
-  await playback!.keyboard.press('Escape')
+  // Escape closes the window from the keydown handler, so the matching keyup
+  // may never be delivered. Treat that as the expected outcome.
+  await playback!.keyboard.press('Escape').catch(() => undefined)
   await expect.poll(async () => (await findPlayback()) === null, { timeout: 30_000 }).toBe(true)
   await expect(preview.getByTestId('preview-page')).toBeVisible()
 })
