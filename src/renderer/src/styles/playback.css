@@ -44,17 +44,24 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px 48px;
 }
 
 .slide-frame {
   position: relative;
   line-height: 0;
+  /* Fit inside the stage while keeping the page aspect ratio. */
+  max-width: calc(100vw - 96px);
+  max-height: calc(100vh - 48px);
+  width: 100%;
+  box-shadow: var(--shadow-float);
+  background: #fff;
 }
 
 .slide-frame canvas {
   display: block;
-  box-shadow: var(--shadow-float);
-  background: #fff;
+  width: 100%;
+  height: 100%;
 }
 
 .side-nav {

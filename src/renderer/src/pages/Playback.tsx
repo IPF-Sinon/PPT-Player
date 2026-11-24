@@ -15,12 +15,6 @@ const IDLE_MS = 2500
 const LENS_SIZE = 240
 const LENS_ZOOM = 2.4
 
-interface FrameSize {
-  width: number
-  height: number
-  dpr: number
-}
-
 export default function PlaybackPage() {
   const store = useAppStore()
   const [pageIndex, setPageIndex] = useState(0)
@@ -35,10 +29,10 @@ export default function PlaybackPage() {
   const [dark, setDark] = useState(false)
   const [pendingDigits, setPendingDigits] = useState('')
   const [loop, setLoop] = useState(false)
-  const [frame, setFrame] = useState<FrameSize>({ width: 0, height: 0, dpr: 1 })
+  const [ratio, setRatio] = useState(16 / 9)
   const [lens, setLens] = useState<{ x: number; y: number } | null>(null)
 
-  const stageRef = useRef<HTMLDivElement | null>(null)
+  const frameRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const idleTimer = useRef<number | null>(null)
   const queue = useMemo(() => new RenderQueue(), [])
@@ -88,6 +82,11 @@ export default function PlaybackPage() {
     await window.api.exitPlayback()
   }, [])
 
+  const dismissBlank = useCallback((): void => {
+    setBlackout(false)
+    setWhiteout(false)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     const boot = async (): Promise<void> => {
@@ -124,23 +123,37 @@ export default function PlaybackPage() {
     }
   }, [pokeChrome])
 
-  // Render the current slide and size the frame it occupies.
+  // Keep the slide box ratio in sync with the current page.
+  useEffect(() => {
+    const sizes = store.deck.info?.pageSizes
+    const size = sizes?.[pageIndex]
+    if (size && size.height > 0) setRatio(size.width / size.height)
+  }, [pageIndex, store.deck.info?.pageSizes])
+
+  // Render the slide into the box CSS already sized for it, and re-render on resize.
   useEffect(() => {
     const doc = store.deck.doc
     if (!doc) return
     let cancelled = false
+    let raf = 0
+    let lastKey = ''
 
     const draw = async (): Promise<void> => {
-      const host = stageRef.current
-      if (!host) return
-      const rect = host.getBoundingClientRect()
-      if (rect.width < 64 || rect.height < 64) return
+      const box = frameRef.current
+      if (!box) return
+      const rect = box.getBoundingClientRect()
+      if (rect.width < 32 || rect.height < 32) return
+
       const dpr = Math.min(2, window.devicePixelRatio || 1)
+      const key = Math.round(rect.width) + 'x' + Math.round(rect.height) + ':' + pageIndex + ':' + dpr
+      if (key === lastKey) return
+      lastKey = key
+
       const bitmap = await renderPageToCanvas({
         doc,
         pageNumber: pageIndex + 1,
-        boxWidth: Math.max(160, rect.width - 64),
-        boxHeight: Math.max(90, rect.height - 64),
+        boxWidth: rect.width,
+        boxHeight: rect.height,
         dpr
       })
       if (cancelled) return
@@ -148,15 +161,12 @@ export default function PlaybackPage() {
       if (!canvas) return
       canvas.width = bitmap.width
       canvas.height = bitmap.height
-      const cssWidth = Math.round(bitmap.width / dpr)
-      const cssHeight = Math.round(bitmap.height / dpr)
-      canvas.style.width = cssWidth + 'px'
-      canvas.style.height = cssHeight + 'px'
+      canvas.style.width = '100%'
+      canvas.style.height = '100%'
       const ctx = canvas.getContext('2d')
       ctx?.drawImage(bitmap.canvas, 0, 0)
-      setFrame({ width: cssWidth, height: cssHeight, dpr })
 
-      // Sample the slide corner so the chrome can invert over light decks.
+      // Sample a corner so the chrome can invert over light decks.
       try {
         const sample = ctx?.getImageData(0, 0, Math.min(24, canvas.width), Math.min(24, canvas.height))
         if (sample) {
@@ -172,22 +182,40 @@ export default function PlaybackPage() {
       }
     }
 
-    void draw()
-
-    const onResize = (): void => {
-      void draw()
+    const schedule = (): void => {
+      if (raf) window.cancelAnimationFrame(raf)
+      raf = window.requestAnimationFrame(() => {
+        void draw()
+      })
     }
-    window.addEventListener('resize', onResize)
+
+    schedule()
+
+    const observer = new ResizeObserver(schedule)
+    if (frameRef.current) observer.observe(frameRef.current)
+    window.addEventListener('resize', schedule)
+
     return () => {
       cancelled = true
-      window.removeEventListener('resize', onResize)
+      if (raf) window.cancelAnimationFrame(raf)
+      observer.disconnect()
+      window.removeEventListener('resize', schedule)
     }
-  }, [store.deck.doc, pageIndex, queue])
+  }, [store.deck.doc, pageIndex])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       pokeChrome()
       const key = event.key
+
+      if (blackout || whiteout) {
+        if (key === 'Escape') {
+          void endShow()
+          return
+        }
+        dismissBlank()
+        if (key !== 'b' && key !== 'B' && key !== '.' && key !== 'w' && key !== 'W') return
+      }
 
       if (/^[0-9]$/.test(key)) {
         setPendingDigits((d) => (d + key).slice(0, 4))
@@ -270,7 +298,20 @@ export default function PlaybackPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [endShow, goTo, helpOpen, next, overviewOpen, pageCount, pendingDigits, pokeChrome, prev])
+  }, [
+    blackout,
+    dismissBlank,
+    endShow,
+    goTo,
+    helpOpen,
+    next,
+    overviewOpen,
+    pageCount,
+    pendingDigits,
+    pokeChrome,
+    prev,
+    whiteout
+  ])
 
   const commitStroke = useCallback(
     (stroke: InkStroke): void => {
@@ -290,17 +331,15 @@ export default function PlaybackPage() {
   const currentStrokes = ink.find((p) => p.pageIndex === pageIndex)?.strokes ?? []
 
   const onStageClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
-    // A click always dismisses blackout / whiteout, like PowerPoint.
     if (blackout || whiteout) {
-      setBlackout(false)
-      setWhiteout(false)
+      dismissBlank()
       return
     }
     if (tool !== 'pointer') return
     const rect = event.currentTarget.getBoundingClientRect()
-    const ratio = (event.clientX - rect.left) / rect.width
-    if (ratio > 0.66) next()
-    else if (ratio < 0.34) prev()
+    const position = (event.clientX - rect.left) / rect.width
+    if (position > 0.66) next()
+    else if (position < 0.34) prev()
     else pokeChrome()
   }
 
@@ -313,8 +352,8 @@ export default function PlaybackPage() {
     setLens({ x: event.clientX - rect.left, y: event.clientY - rect.top })
   }
 
-  const lensLeft = lens ? Math.min(Math.max(0, lens.x - LENS_SIZE / 2), Math.max(0, frame.width - LENS_SIZE)) : 0
-  const lensTop = lens ? Math.min(Math.max(0, lens.y - LENS_SIZE / 2), Math.max(0, frame.height - LENS_SIZE)) : 0
+  const lensLeft = lens ? Math.min(Math.max(0, lens.x - LENS_SIZE / 2), Math.max(0, LENS_SIZE)) : 0
+  const lensTop = lens ? Math.min(Math.max(0, lens.y - LENS_SIZE / 2), Math.max(0, LENS_SIZE)) : 0
 
   return (
     <div
@@ -323,21 +362,20 @@ export default function PlaybackPage() {
       data-blackout={blackout}
       data-whiteout={whiteout}
       onMouseMove={pokeChrome}
-      onClick={blackout || whiteout ? () => { setBlackout(false); setWhiteout(false) } : undefined}
     >
-      <div className="slide-wrap" ref={stageRef}>
-        <div
-          className="slide-frame"
-          style={{ width: frame.width || undefined, height: frame.height || undefined }}
-          onClick={onStageClick}
-          onMouseMove={onStageMove}
-          onMouseLeave={() => setLens(null)}
-          role="presentation"
-        >
+      <div
+        className="slide-wrap"
+        ref={frameRef}
+        onClick={onStageClick}
+        onMouseMove={onStageMove}
+        onMouseLeave={() => setLens(null)}
+        role="presentation"
+      >
+        <div className="slide-frame" style={{ aspectRatio: String(ratio) }}>
           <canvas ref={canvasRef} data-testid="playback-canvas" />
           <InkLayer
-            width={frame.width}
-            height={frame.height}
+            width={frameRef.current?.clientWidth ?? 1280}
+            height={frameRef.current?.clientHeight ?? 720}
             strokes={currentStrokes}
             active={tool === 'pen' || tool === 'eraser'}
             tool={tool === 'eraser' ? 'eraser' : 'pen'}
@@ -346,26 +384,21 @@ export default function PlaybackPage() {
             onCommit={commitStroke}
           />
           {lens ? (
-            <div
-              className="magnifier"
-              data-testid="magnifier-lens"
-              style={{ left: lensLeft, top: lensTop }}
-            >
+            <div className="magnifier" data-testid="magnifier-lens" style={{ left: lensLeft, top: lensTop }}>
               <canvas
                 ref={(node) => {
-                  if (!node || !canvasRef.current) return
                   const source = canvasRef.current
+                  if (!node || !source) return
                   node.width = source.width
                   node.height = source.height
                   const ctx = node.getContext('2d')
-                  if (ctx) {
-                    ctx.clearRect(0, 0, node.width, node.height)
-                    ctx.drawImage(source, 0, 0)
-                  }
+                  if (!ctx) return
+                  ctx.clearRect(0, 0, node.width, node.height)
+                  ctx.drawImage(source, 0, 0)
                 }}
                 style={{
-                  width: frame.width * LENS_ZOOM + 'px',
-                  height: frame.height * LENS_ZOOM + 'px',
+                  width: (frameRef.current?.clientWidth ?? 0) * LENS_ZOOM + 'px',
+                  height: (frameRef.current?.clientHeight ?? 0) * LENS_ZOOM + 'px',
                   left: -(lens.x * LENS_ZOOM - LENS_SIZE / 2) + 'px',
                   top: -(lens.y * LENS_ZOOM - LENS_SIZE / 2) + 'px'
                 }}
