@@ -1,0 +1,7 @@
+# pnpm settings shared by local runs and CI.
+# Exact versions are pinned in package.json, so no release cooldown is needed.
+minimumReleaseAge: 0
+allowBuilds:
+  electron: true
+  esbuild: true
+  electron-winstaller: false

@@ -1,0 +1,55 @@
+{
+  "name": "ppt-player",
+  "version": "0.1.0",
+  "description": "Windows desktop player for PowerPoint / OpenDocument presentations",
+  "main": "./out/main/index.js",
+  "author": "PolarNight",
+  "license": "MIT",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "node scripts/copy-pdfjs-assets.mjs && electron-vite build",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "package": "npm run build && electron-builder --win nsis zip --x64 --publish never",
+    "fixtures": "node scripts/make-fixtures.mjs"
+  },
+  "dependencies": {
+    "cfb": "1.2.2",
+    "electron-log": "5.4.4",
+    "fflate": "0.8.3",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.65.1",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "@vitest/coverage-v8": "5.1.1",
+    "electron": "45.3.4",
+    "electron-builder": "26.18.0",
+    "electron-vite": "6.0.0",
+    "eslint": "9.39.5",
+    "pdfjs-dist": "6.5.438",
+    "png-to-ico": "3.0.2",
+    "pptxgenjs": "4.0.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.74.0",
+    "vite": "8.3.8",
+    "vitest": "5.1.1",
+    "zustand": "5.1.0"
+  }
+}
