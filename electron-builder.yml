@@ -56,7 +56,6 @@ win:
       name: PDF Document
       role: Viewer
 nsis:
-  compression: maximum
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
