@@ -23,6 +23,8 @@
   background: #fff;
 }
 
+.playback[data-board='true'] .slide-wrap,
+.playback[data-board='true'] .side-nav,
 .playback[data-blackout='true'] .slide-wrap,
 .playback[data-whiteout='true'] .slide-wrap,
 .playback[data-blackout='true'] .side-nav,
@@ -348,4 +350,15 @@
   color: #f9fafb;
   font-size: 12px;
   pointer-events: none;
+}
+/* ------------------------------------------------------------------ whiteboard */
+/* A full-screen annotation surface. It sits under the chrome so the toolbar and
+   side nav stay reachable while drawing, but above the slide it replaces. */
+.whiteboard {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  background: #ffffff;
+  cursor: crosshair;
+  touch-action: none;
 }

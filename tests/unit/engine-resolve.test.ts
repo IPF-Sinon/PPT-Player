@@ -13,27 +13,27 @@ function fakeEngineRoot(): string {
 }
 
 describe('resolveLibreOffice', () => {
-  it('prefers the bundled engine', () => {
+  it('prefers the bundled engine', async () => {
     const root = fakeEngineRoot()
-    const status = resolveLibreOffice({ bundledRoots: [root], platform: 'win32', pathVar: '' })
+    const status = await resolveLibreOffice({ bundledRoots: [root], platform: 'win32', pathVar: '' })
     expect(status.available).toBe(true)
     expect(status.origin).toBe('bundled')
     expect(status.path).toBe(join(root, 'program', 'soffice.com'))
   })
 
-  it('finds a versioned sub-directory inside the engine root', () => {
+  it('finds a versioned sub-directory inside the engine root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'lo-root-'))
     const program = join(root, 'LibreOffice', 'program')
     mkdirSync(program, { recursive: true })
     writeFileSync(join(program, 'soffice.com'), '')
-    const status = resolveLibreOffice({ bundledRoots: [root], platform: 'win32', pathVar: '' })
+    const status = await resolveLibreOffice({ bundledRoots: [root], platform: 'win32', pathVar: '' })
     expect(status.available).toBe(true)
     expect(status.path).toContain('LibreOffice')
   })
 
-  it('honours an explicit override', () => {
+  it('honours an explicit override', async () => {
     const root = fakeEngineRoot()
-    const status = resolveLibreOffice({
+    const status = await resolveLibreOffice({
       loPathOverride: root,
       bundledRoots: [],
       platform: 'win32',
@@ -43,9 +43,9 @@ describe('resolveLibreOffice', () => {
     expect(status.available).toBe(true)
   })
 
-  it('ignores an unusable override', () => {
+  it('ignores an unusable override', async () => {
     const root = fakeEngineRoot()
-    const status = resolveLibreOffice({
+    const status = await resolveLibreOffice({
       loPathOverride: join(tmpdir(), 'nope-does-not-exist'),
       bundledRoots: [root],
       platform: 'win32',
@@ -54,9 +54,9 @@ describe('resolveLibreOffice', () => {
     expect(status.origin).toBe('bundled')
   })
 
-  it('falls back to the registry', () => {
+  it('falls back to the registry', async () => {
     const root = fakeEngineRoot()
-    const status = resolveLibreOffice({
+    const status = await resolveLibreOffice({
       bundledRoots: [],
       platform: 'win32',
       pathVar: '',
@@ -70,9 +70,9 @@ describe('resolveLibreOffice', () => {
     expect(status.available).toBe(true)
   })
 
-  it('falls back to PATH', () => {
+  it('falls back to PATH', async () => {
     const root = fakeEngineRoot()
-    const status = resolveLibreOffice({
+    const status = await resolveLibreOffice({
       bundledRoots: [],
       platform: 'win32',
       pathVar: ['C:\\Windows', join(root, 'program')].join(';'),
@@ -81,8 +81,8 @@ describe('resolveLibreOffice', () => {
     expect(status.origin).toBe('path')
   })
 
-  it('reports unavailable when nothing is found', () => {
-    const status = resolveLibreOffice({ bundledRoots: [], platform: 'win32', pathVar: '', runCommand: () => null })
+  it('reports unavailable when nothing is found', async () => {
+    const status = await resolveLibreOffice({ bundledRoots: [], platform: 'win32', pathVar: '', runCommand: () => null })
     expect(status.available).toBe(false)
     expect(status.origin).toBe('none')
   })

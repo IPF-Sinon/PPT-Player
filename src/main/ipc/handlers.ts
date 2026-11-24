@@ -113,16 +113,16 @@ export function registerHandlers(deps: HandlerDeps): void {
     })
   )
 
-  ipcMain.handle(IPC.engineStatus, () => wrap((): EngineStatus => engineStatus()))
+  ipcMain.handle(IPC.engineStatus, () => wrap((): Promise<EngineStatus> => engineStatus()))
   ipcMain.handle(IPC.engineRecheck, () =>
-    wrap((): EngineStatus => {
+    wrap((): Promise<EngineStatus> => {
       resetEngineCache()
       return engineStatus(true)
     })
   )
 
   ipcMain.handle(IPC.engineSetLoPath, (_e, raw: unknown) =>
-    wrap((): EngineStatus => {
+    wrap((): Promise<EngineStatus> => {
       const { path } = setLoPathSchema.parse(raw)
       saveSettings({ loPathOverride: path })
       resetEngineCache()

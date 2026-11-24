@@ -211,7 +211,63 @@ test('9. the pen tool records ink on the slide', async () => {
   await playback!.getByTestId('tool-pointer').click()
 })
 
-test('10. the overview grid opens and closes', async () => {
+test('10. the whiteboard opens, takes ink, and closes with Escape', async () => {
+  expect(playback).not.toBeNull()
+
+  // The board is a real drawing surface, not just a blanked slide.
+  await expect
+    .poll(
+      async () => {
+        await playback!.mouse.move(640, 400).catch(() => undefined)
+        await playback!
+          .getByTestId('tool-board')
+          .click({ timeout: 2000 })
+          .catch(() => undefined)
+        return await playback!
+          .getByTestId('whiteboard')
+          .isVisible()
+          .catch(() => false)
+      },
+      { timeout: 30_000, intervals: [300, 800, 1500] }
+    )
+    .toBe(true)
+
+  const board = playback!.getByTestId('whiteboard')
+  const box = await board.boundingBox()
+  expect(box).not.toBeNull()
+
+  // Draw one stroke and confirm the pen actually marked the canvas.
+  await playback!.mouse.move(box!.x + box!.width * 0.3, box!.y + box!.height * 0.4)
+  await playback!.mouse.down()
+  await playback!.mouse.move(box!.x + box!.width * 0.5, box!.y + box!.height * 0.55, { steps: 8 })
+  await playback!.mouse.move(box!.x + box!.width * 0.7, box!.y + box!.height * 0.45, { steps: 8 })
+  await playback!.mouse.up()
+
+  // Count painted pixels so a board that merely renders as white cannot pass.
+  // The e2e tsconfig has no DOM lib, so the canvas is described structurally.
+  const inked = await board.evaluate((node) => {
+    const canvas = node as unknown as {
+      width: number
+      height: number
+      getContext(id: '2d'): {
+        getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray }
+      } | null
+    }
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return 0
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+    let painted = 0
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++
+    return painted
+  })
+  expect(inked).toBeGreaterThan(0)
+  await playback!.screenshot({ path: join(shots, 'whiteboard.png') })
+
+  await playback!.keyboard.press('Escape')
+  await expect(board).toBeHidden()
+})
+
+test('11. the overview grid opens and closes', async () => {
   expect(playback).not.toBeNull()
   await playback!.keyboard.press('o')
   await expect(playback!.getByTestId('overview-grid')).toBeVisible()
@@ -220,7 +276,7 @@ test('10. the overview grid opens and closes', async () => {
   await expect(playback!.getByTestId('overview-grid')).toBeHidden()
 })
 
-test('11. Escape ends the show and returns to the preview window', async () => {
+test('12. Escape ends the show and returns to the preview window', async () => {
   expect(playback).not.toBeNull()
   // Escape closes the window from the keydown handler, so the matching keyup
   // may never be delivered. Treat that as the expected outcome.
@@ -229,6 +285,6 @@ test('11. Escape ends the show and returns to the preview window', async () => {
   await expect(preview.getByTestId('preview-page')).toBeVisible()
 })
 
-test('12. the window title carries the file name', async () => {
+test('13. the window title carries the file name', async () => {
   expect(await preview.title()).toContain(deckName)
 })

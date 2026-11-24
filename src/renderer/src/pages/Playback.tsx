@@ -8,6 +8,7 @@ import { RenderQueue, renderPageToCanvas } from '../lib/render'
 import { SideNav } from '../components/SideNav'
 import { PlayToolbar, type PlayTool } from '../components/PlayToolbar'
 import { InkLayer } from '../components/InkLayer'
+import { Whiteboard } from '../components/Whiteboard'
 import { OverviewGrid } from '../components/OverviewGrid'
 import '../styles/playback.css'
 
@@ -22,6 +23,9 @@ export default function PlaybackPage() {
   const [tool, setTool] = useState<PlayTool>('pointer')
   const [blackout, setBlackout] = useState(false)
   const [whiteout, setWhiteout] = useState(false)
+  /** The annotation board: a full-screen surface with its own strokes. */
+  const [boardOpen, setBoardOpen] = useState(false)
+  const [boardStrokes, setBoardStrokes] = useState<InkStroke[]>([])
   const [overviewOpen, setOverviewOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [toast, setToast] = useState('')
@@ -39,6 +43,7 @@ export default function PlaybackPage() {
     pageCount: 0,
     blackout: false,
     whiteout: false,
+    boardOpen: false,
     overviewOpen: false,
     helpOpen: false,
     pendingDigits: '',
@@ -145,6 +150,7 @@ export default function PlaybackPage() {
     pageCount,
     blackout,
     whiteout,
+    boardOpen,
     overviewOpen,
     helpOpen,
     pendingDigits,
@@ -303,6 +309,10 @@ export default function PlaybackPage() {
           jump(state.pageCount - 1)
           return
         case 'Escape':
+          if (state.boardOpen) {
+            setBoardOpen(false)
+            return
+          }
           if (state.overviewOpen) {
             setOverviewOpen(false)
             return
@@ -323,6 +333,13 @@ export default function PlaybackPage() {
         case 'W':
           setBlackout(false)
           setWhiteout((v) => !v)
+          return
+        case 'd':
+        case 'D':
+          // Whiteboard: a blank canvas for freehand notes, independent of slides.
+          setBlackout(false)
+          setWhiteout(false)
+          setBoardOpen((v) => !v)
           return
         case 'o':
         case 'O':
@@ -396,9 +413,12 @@ export default function PlaybackPage() {
       data-testid="playback-page"
       data-blackout={blackout}
       data-whiteout={whiteout}
+      data-board={boardOpen}
       onMouseMove={pokeChrome}
       onClick={() => {
         // Blanked surfaces hide the chrome, so the root takes the restoring click.
+        // The board is a drawing surface, so it never dismisses on click.
+        if (boardOpen) return
         if (blackout || whiteout) dismissBlank()
       }}
     >
@@ -447,6 +467,14 @@ export default function PlaybackPage() {
         </div>
       </div>
 
+      {boardOpen ? (
+        <Whiteboard
+          strokes={boardStrokes}
+          tool={tool === 'eraser' ? 'eraser' : 'pen'}
+          onCommit={(stroke) => setBoardStrokes((prev) => [...prev, stroke])}
+        />
+      ) : null}
+
       <SideNav
         side="left"
         pageIndex={pageIndex}
@@ -469,6 +497,7 @@ export default function PlaybackPage() {
       <PlayToolbar
         tool={tool}
         blackout={blackout}
+        boardOpen={boardOpen}
         overviewOpen={overviewOpen}
         onTool={(t) => {
           setTool(t)
@@ -478,6 +507,11 @@ export default function PlaybackPage() {
         onToggleBlackout={() => {
           setWhiteout(false)
           setBlackout((v) => !v)
+        }}
+        onToggleBoard={() => {
+          setBlackout(false)
+          setWhiteout(false)
+          setBoardOpen((v) => !v)
         }}
         onToggleOverview={() => setOverviewOpen((v) => !v)}
         onEnd={() => void endShow()}

@@ -32,9 +32,9 @@
   --shadow-float: 0 8px 40px rgba(0, 0, 0, 0.5);
 
   --chrome-bg-light: rgba(255, 255, 255, 0.55);
-  --chrome-bg-dark: rgba(0, 0, 0, 0.45);
+  --chrome-bg-dark: rgba(0, 0, 0, 0.32);
   --chrome-border-light: rgba(255, 255, 255, 0.6);
-  --chrome-border-dark: rgba(255, 255, 255, 0.16);
+  --chrome-border-dark: rgba(255, 255, 255, 0.22);
 
   --topbar-h: 48px;
   --rail-w: 240px;

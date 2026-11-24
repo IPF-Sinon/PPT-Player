@@ -60,6 +60,13 @@ export const Screen = svg(
     <path d="M12 16v4M8.5 20h7" />
   </>
 )
+export const Board = svg(
+  <>
+    <rect x="3" y="4.5" width="18" height="12.5" rx="1.6" />
+    <path d="M7 20l5-3 5 3" />
+    <path d="M8.5 13l2.5-3 2 2.2 2.5-3.2" />
+  </>
+)
 export const Grid = svg(
   <>
     <rect x="3.5" y="4.5" width="17" height="15" rx="1.8" />

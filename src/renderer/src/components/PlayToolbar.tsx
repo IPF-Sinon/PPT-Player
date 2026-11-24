@@ -1,14 +1,16 @@
 import type { ReactNode } from 'react'
-import { ChevronDown, EndShow, Eraser, Grid, Magnifier, Pen, Pointer, Screen } from './icons'
+import { Board, EndShow, Eraser, Grid, Magnifier, Pen, Pointer, Screen } from './icons'
 
 export type PlayTool = 'pointer' | 'pen' | 'eraser' | 'magnifier'
 
 interface PlayToolbarProps {
   tool: PlayTool
   blackout: boolean
+  boardOpen: boolean
   overviewOpen: boolean
   onTool: (tool: PlayTool) => void
   onToggleBlackout: () => void
+  onToggleBoard: () => void
   onToggleOverview: () => void
   onEnd: () => void
   visible: boolean
@@ -16,7 +18,19 @@ interface PlayToolbarProps {
 }
 
 export function PlayToolbar(props: PlayToolbarProps) {
-  const { tool, blackout, overviewOpen, onTool, onToggleBlackout, onToggleOverview, onEnd, visible, dark } = props
+  const {
+    tool,
+    blackout,
+    boardOpen,
+    overviewOpen,
+    onTool,
+    onToggleBlackout,
+    onToggleBoard,
+    onToggleOverview,
+    onEnd,
+    visible,
+    dark
+  } = props
 
   const items: Array<{ id: PlayTool; label: string; icon: ReactNode; testId: string }> = [
     { id: 'pointer', label: '指针', icon: <Pointer size={20} />, testId: 'tool-pointer' },
@@ -59,17 +73,26 @@ export function PlayToolbar(props: PlayToolbarProps) {
         <button
           type="button"
           className="tool-btn"
+          data-active={boardOpen}
+          title="白板（D）"
+          aria-label="白板"
+          aria-pressed={boardOpen}
+          data-testid="tool-board"
+          onClick={onToggleBoard}
+        >
+          <Board size={20} />
+        </button>
+        <button
+          type="button"
+          className="tool-btn"
           data-active={overviewOpen}
-          title="幻灯片总览"
+          title="幻灯片总览（O）"
           aria-label="幻灯片总览"
           aria-pressed={overviewOpen}
           data-testid="tool-overview"
           onClick={onToggleOverview}
         >
           <Grid size={20} />
-        </button>
-        <button type="button" className="tool-btn" title="更多" aria-label="更多" data-testid="tool-more">
-          <ChevronDown size={20} />
         </button>
       </div>
       <button

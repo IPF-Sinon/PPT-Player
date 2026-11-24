@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
-import { copyFileSync, createReadStream, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { basename, extname, join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { copyFileSync, createReadStream, mkdirSync, rmSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { MAX_SOURCE_BYTES, extensionOf } from '../../shared/formats'
 import { AppError, toPayload } from '../../shared/errors'
 import type { ConvertProgress, DeckInfo, FormatInfo, OpenResult } from '../../shared/types'
@@ -15,7 +14,7 @@ export interface ConvertContext {
   cacheRoot: string
   appVersion: string
   /** Resolved conversion engine, injected so the pipeline stays testable. */
-  engine: () => EngineStatus
+  engine: () => EngineStatus | Promise<EngineStatus>
   /** Called after a deck is opened successfully, used to update the recent list. */
   onOpened?: (filePath: string) => void
 }
@@ -115,7 +114,7 @@ export async function openDeck(
     }
 
     const isPdf = probe.format.kind === 'pdf'
-    const engine = ctx.engine()
+    const engine = await ctx.engine()
     if (!isPdf && !engine.available) {
       throw new AppError('ENOENGINE', '转换引擎不可用', engine.detail)
     }
@@ -273,19 +272,4 @@ export function closeDeck(deckId: string): void {
 export function ensureCacheDir(ctx: ConvertContext): string {
   mkdirSync(ctx.cacheRoot, { recursive: true })
   return ctx.cacheRoot
-}
-
-export function writeMarker(dir: string, name: string, content: string): void {
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, name), content, 'utf8')
-}
-
-export function tempDirFor(name: string): string {
-  const dir = join(tmpdir(), 'ppt-player', name + '-' + createHash('sha256').update(String(Date.now()) + Math.random()).digest('hex').slice(0, 8))
-  mkdirSync(dir, { recursive: true })
-  return dir
-}
-
-export function baseNameOf(filePath: string): string {
-  return basename(filePath, extname(filePath))
 }

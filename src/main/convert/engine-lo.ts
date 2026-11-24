@@ -77,7 +77,13 @@ export async function runLibreOffice(opts: LoRunOptions): Promise<LoRunResult> {
   return await new Promise<LoRunResult>((resolve) => {
     let child: ChildProcess
     try {
-      child = spawn(opts.sofficePath, args, { windowsHide: true })
+      // stdout must be consumed. soffice writes progress to stdout, and a piped
+      // stream nobody drains fills its 64 KB buffer and blocks the child forever —
+      // which is what "stuck on 正在转换" actually was. Only stderr is kept.
+      child = spawn(opts.sofficePath, args, {
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe']
+      })
     } catch (err) {
       log.error('failed to spawn soffice', err)
       rmSync(profileDir, { recursive: true, force: true })

@@ -3,7 +3,7 @@ import type { DragEvent as ReactDragEvent } from 'react'
 import type { DeckInfo, EngineStatus } from '@shared/types'
 import { zh } from '@shared/strings.zh'
 import { useAppStore } from '../store'
-import { loadPdf, readPageSizes } from '../lib/pdf'
+import { loadPdf, readFirstPageSize, readPageSizes } from '../lib/pdf'
 import { RenderQueue } from '../lib/render'
 import { ThumbRail } from '../components/ThumbRail'
 import { SlideStage } from '../components/SlideStage'
@@ -59,7 +59,7 @@ export default function PreviewPage() {
           store.setLoading(false)
           return
         }
-        await mountDeck(result.info)
+        await mountDeck(result.info, token)
       } finally {
         unsubscribe()
         if (token === openToken.current) store.setLoading(false)
@@ -70,20 +70,38 @@ export default function PreviewPage() {
   )
 
   const mountDeck = useCallback(
-    async (info: DeckInfo): Promise<void> => {
+    async (info: DeckInfo, token: number): Promise<void> => {
       const url = (await window.api.deckUrl(info.deckId)) ?? ''
       console.log('[preview] mounting deck', info.deckId, url)
       try {
         const doc = await loadPdf(url)
-        const sizes = await readPageSizes(doc)
-        const updated = await window.api.reportMetrics(info.deckId, doc.numPages, sizes)
-        const finalInfo = updated ?? { ...info, pageCount: doc.numPages, pageSizes: sizes }
-        store.setDeck({ info: finalInfo, doc, url })
+
+        // Paint as soon as the first page is measured. Measuring every page first
+        // is what made a large deck sit on 正在转换 with nothing on screen.
+        const first = await readFirstPageSize(doc)
+        const initial = {
+          ...info,
+          pageCount: doc.numPages,
+          pageSizes: first ? [first] : []
+        }
+        store.setDeck({ info: initial, doc, url })
         store.setPage(0)
+        document.title = zh.windowTitle(info.sourcePath.split(/[\\/]/).pop() ?? '')
+        console.log('[preview] first page ready', doc.numPages, 'pages')
+
+        // Fill in the remaining page sizes in the background for the overview grid.
+        void readPageSizes(doc, (sizes) => {
+          if (openToken.current !== token) return
+          const current = useAppStore.getState().deck.info
+          if (!current || current.deckId !== info.deckId) return
+          store.setDeck({ info: { ...current, pageSizes: sizes }, doc, url })
+        }).then((sizes) => {
+          if (openToken.current !== token) return
+          void window.api.reportMetrics(info.deckId, doc.numPages, sizes)
+        })
+
         const ink = await window.api.loadInk(info.deckId)
         store.setInk(ink)
-        document.title = zh.windowTitle(info.sourcePath.split(/[\\/]/).pop() ?? '')
-        console.log('[preview] deck ready', doc.numPages, 'pages')
       } catch (err) {
         console.error('[preview] failed to open the converted PDF', err)
         store.setError({ message: '无法解析转换后的 PDF', detail: String(err) })

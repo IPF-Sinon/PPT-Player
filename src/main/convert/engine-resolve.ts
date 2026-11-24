@@ -15,8 +15,8 @@ export interface ResolveOptions {
   pathVar?: string
   /** Platform string, injectable for tests. */
   platform?: NodeJS.Platform
-  /** Command runner used to query the registry. */
-  runCommand?: (file: string, args: string[]) => string | null
+  /** Command runner used to query the registry. May be async so it never blocks. */
+  runCommand?: (file: string, args: string[]) => string | null | Promise<string | null>
 }
 
 export const WIN_REGISTRY_KEYS = [
@@ -37,10 +37,13 @@ function findBundled(roots: string[]): string | null {
   return null
 }
 
-function findInRegistry(keys: string[], runCommand: ResolveOptions['runCommand']): string | null {
+async function findInRegistry(
+  keys: string[],
+  runCommand: ResolveOptions['runCommand']
+): Promise<string | null> {
   if (!runCommand) return null
   for (const key of keys) {
-    const out = runCommand('reg', ['query', key, '/ve'])
+    const out = await runCommand('reg', ['query', key, '/ve'])
     if (!out) continue
     const match = /REG_[A-Z_]+\s+(.+)$/m.exec(out)
     const dir = match?.[1]?.trim().replace(/^"|"$/g, '')
@@ -64,7 +67,7 @@ function findOnPath(pathVar: string, platform: NodeJS.Platform): string | null {
  * Resolve the LibreOffice binary: explicit override, bundled engine, registry
  * install, then PATH. Pure enough to unit test without Electron.
  */
-export function resolveLibreOffice(options: ResolveOptions): EngineStatus {
+export async function resolveLibreOffice(options: ResolveOptions): Promise<EngineStatus> {
   const platform = options.platform ?? process.platform
 
   const override = options.loPathOverride?.trim()
@@ -89,7 +92,7 @@ export function resolveLibreOffice(options: ResolveOptions): EngineStatus {
   }
 
   if (platform === 'win32') {
-    const installed = findInRegistry(options.registryKeys ?? WIN_REGISTRY_KEYS, options.runCommand)
+    const installed = await findInRegistry(options.registryKeys ?? WIN_REGISTRY_KEYS, options.runCommand)
     if (installed) {
       return {
         available: true,
