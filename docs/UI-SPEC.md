@@ -72,3 +72,26 @@
 - **转换中**：舞台覆盖半透明层，进度条 `260×4`，文案随阶段变化（识别 / 转换 / 解析）。
 - **引擎缺失**：错误卡片给出期望路径、打开日志、重新检测三个出口。
 - **缓存命中**：直接进入解析阶段，进度条瞬间走满。
+## 实际截图
+
+以下截图由 CI 的 Playwright 用例在 `windows-latest` 上自动生成，可视为验收基线。
+
+### 预览页
+
+![预览页](screens/preview.png)
+
+### 放映页
+
+![放映页](screens/playback.png)
+
+### 放映页 · 墨迹
+
+![墨迹](screens/playback-ink.png)
+
+### 幻灯片总览
+
+![总览](screens/overview.png)
+
+### 黑屏
+
+![黑屏](screens/blackout.png)
