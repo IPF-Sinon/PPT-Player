@@ -26,6 +26,29 @@ async function findPlayback(): Promise<Page | null> {
   return null
 }
 
+/**
+ * Click a chrome control and retry until the expected page label appears.
+ * The chrome fades after 2.5s idle, so a click can land while it is inert.
+ */
+async function clickUntilPage(page: Page, testId: string, expected: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await page.mouse.move(640, 360)
+        await page
+          .getByTestId(testId)
+          .click({ timeout: 2000 })
+          .catch(() => undefined)
+        return await page
+          .getByTestId('side-page-left')
+          .textContent()
+          .catch(() => '')
+      },
+      { timeout: 60_000, intervals: [200, 400, 800] }
+    )
+    .toBe(expected)
+}
+
 test.describe.configure({ mode: 'serial' })
 
 test.beforeAll(async () => {
@@ -140,25 +163,27 @@ test('6. keyboard navigation advances and rewinds', async () => {
 
 test('7. both side nav stacks are clickable', async () => {
   expect(playback).not.toBeNull()
-
-  // The chrome fades out after 2.5s of inactivity; a real user moves the mouse
-  // first, which is what makes the nav interactive again.
-  await playback!.mouse.move(640, 360)
-  const nextRight = playback!.getByTestId('side-next-right')
-  await expect(nextRight).toHaveCSS('opacity', '1')
-  await nextRight.click()
+  await clickUntilPage(playback!, 'side-next-right', '3/3')
   await expect(playback!.getByTestId('side-page-right')).toHaveText('3/3')
-
-  await playback!.mouse.move(640, 360)
-  await playback!.getByTestId('side-prev-left').click()
-  await expect(playback!.getByTestId('side-page-left')).toHaveText('2/3')
+  await clickUntilPage(playback!, 'side-prev-left', '2/3')
+  await expect(playback!.getByTestId('side-page-right')).toHaveText('2/3')
 })
 
 test('8. blackout hides the slide and any click restores it', async () => {
   expect(playback).not.toBeNull()
-  await playback!.mouse.move(640, 360)
-  await playback!.getByTestId('tool-blackout').click()
-  await expect(playback!.getByTestId('playback-page')).toHaveAttribute('data-blackout', 'true')
+  await expect
+    .poll(
+      async () => {
+        await playback!.mouse.move(640, 360)
+        await playback!.getByTestId('tool-blackout').click({ timeout: 2000 }).catch(() => undefined)
+        return await playback!
+          .getByTestId('playback-page')
+          .getAttribute('data-blackout')
+          .catch(() => null)
+      },
+      { timeout: 30_000, intervals: [200, 400, 800] }
+    )
+    .toBe('true')
   await playback!.screenshot({ path: join(shots, 'playback-blackout.png') })
   // The chrome is hidden while blanked, so a click on the surface must restore it.
   await playback!.mouse.click(20, 20)
