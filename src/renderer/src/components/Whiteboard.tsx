@@ -70,11 +70,26 @@ export function Whiteboard({ strokes, tool, onCommit }: WhiteboardProps) {
   const onDown = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     event.currentTarget.setPointerCapture(event.pointerId)
     const [x, y] = pointOf(event)
-    drawingRef.current = {
+    const stroke: InkStroke = {
       tool: tool === 'eraser' ? 'eraser' : 'pen',
       color: '#e11d48',
       width: 5,
       points: [x, y]
+    }
+    drawingRef.current = stroke
+
+    // Mark the first point immediately, so a single click leaves a dot instead of
+    // nothing at all.
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (ctx && canvas) {
+      ctx.save()
+      ctx.fillStyle = stroke.color
+      if (stroke.tool === 'eraser') ctx.globalCompositeOperation = 'destination-out'
+      ctx.beginPath()
+      ctx.arc(x * canvas.width, y * canvas.height, stroke.width / 2, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
     }
   }
 
@@ -93,7 +108,8 @@ export function Whiteboard({ strokes, tool, onCommit }: WhiteboardProps) {
   const onUp = (): void => {
     const current = drawingRef.current
     drawingRef.current = null
-    if (!current || current.points.length < 4) return
+    // Two coordinates are enough: a dot is a valid stroke on a whiteboard.
+    if (!current || current.points.length < 2) return
     onCommit(current)
   }
 
