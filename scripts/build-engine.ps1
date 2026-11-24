@@ -70,18 +70,8 @@ if (-not $sofficeHit) {
 $installRoot = Split-Path (Split-Path $sofficeHit.FullName -Parent) -Parent
 Write-Host "LibreOffice tree root: $installRoot"
 
-& (Join-Path $PSScriptRoot 'prune-engine.ps1') -InstallRoot $installRoot
-
 $soffice = Join-Path $installRoot 'program\soffice.com'
-if (-not (Test-Path $soffice)) { throw "soffice.com missing after prune: $soffice" }
-
-# Smoke gate: the pruned tree must still convert every fixture the app ships
-# tests for. Aggressive pruning is only safe if this passes, so it runs against
-# the same decks the e2e suite uses.
-$smokeDir = Join-Path $WorkDir 'smoke'
-if (Test-Path $smokeDir) { Remove-Item -Recurse -Force $smokeDir }
-New-Item -ItemType Directory -Force -Path $smokeDir | Out-Null
-
+$pruneScript = Join-Path $PSScriptRoot 'prune-engine.ps1'
 $fixtures = @('smoke.pptx', 'smoke.odp', 'deck-16x9.pptx', 'deck-4x3.pptx')
 $expectedPages = @{
   'smoke.pptx'     = 1
@@ -89,44 +79,70 @@ $expectedPages = @{
   'deck-16x9.pptx' = 3
   'deck-4x3.pptx'  = 2
 }
-foreach ($fixture in $fixtures) {
-  $source = Join-Path $repoRoot "tests\fixtures\$fixture"
-  if (-not (Test-Path $source)) { throw "missing smoke fixture $source" }
-  $stem = [System.IO.Path]::GetFileNameWithoutExtension($fixture)
-  $out = Join-Path $smokeDir $stem
-  New-Item -ItemType Directory -Force -Path $out | Out-Null
-  $profileDir = Join-Path $smokeDir ('profile-' + [guid]::NewGuid().ToString('N'))
-  $profileUrl = 'file:///' + ($profileDir -replace '\\', '/')
 
-  $sofficeArgs = @(
-    '--headless', '--norestore', '--invisible', '--nologo',
-    "-env:UserInstallation=$profileUrl",
-    '--convert-to', 'pdf:impress_pdf_Export',
-    '--outdir', $out, $source
-  )
-  Write-Host "smoke: $fixture"
-  & $soffice @sofficeArgs
-  $pdf = Join-Path $out "$stem.pdf"
-  if (-not (Test-Path $pdf)) { throw "smoke conversion produced no PDF for $fixture" }
-  $bytes = (Get-Item $pdf).Length
-  if ($bytes -lt 1024) { throw "smoke PDF for $fixture is too small: $bytes bytes" }
+$smokeDir = Join-Path $WorkDir 'smoke'
 
-  # A pruned engine can still emit a valid but empty PDF. Parse it with the same
-  # pdf.js build the app renders with, then require the exact page count and a
-  # non-empty first page, which catches a dropped Impress filter or a broken
-  # renderer that a file-size check would miss.
-  $statsJson = & node (Join-Path $repoRoot 'scripts\count-pdf-pages.mjs') $pdf
-  if ($LASTEXITCODE -ne 0) { throw "could not parse the PDF produced for $fixture" }
-  $stats = $statsJson | ConvertFrom-Json
-  $expected = $expectedPages[$fixture]
-  Write-Host "  -> $bytes bytes, $($stats.pages) pages, $($stats.firstPageOps) ops (expected $expected pages)"
-  if ($stats.pages -ne $expected) {
-    throw "smoke conversion of $fixture produced $($stats.pages) pages, expected $expected"
-  }
-  if ($stats.firstPageOps -lt 1) {
-    throw "smoke conversion of $fixture produced a page with no drawable content"
+function Invoke-Smoke {
+  param([string]$Label, [string[]]$Fixtures)
+
+  if (Test-Path $smokeDir) { Remove-Item -Recurse -Force $smokeDir }
+  New-Item -ItemType Directory -Force -Path $smokeDir | Out-Null
+
+  foreach ($fixture in $Fixtures) {
+    $source = Join-Path $repoRoot "tests\fixtures\$fixture"
+    if (-not (Test-Path $source)) { throw "missing smoke fixture $source" }
+    $stem = [System.IO.Path]::GetFileNameWithoutExtension($fixture)
+    $out = Join-Path $smokeDir ($Label + '-' + $stem)
+    New-Item -ItemType Directory -Force -Path $out | Out-Null
+    $profileDir = Join-Path $smokeDir ('profile-' + [guid]::NewGuid().ToString('N'))
+    $profileUrl = 'file:///' + ($profileDir -replace '\\', '/')
+
+    $sofficeArgs = @(
+      '--headless', '--norestore', '--invisible', '--nologo',
+      "-env:UserInstallation=$profileUrl",
+      '--convert-to', 'pdf:impress_pdf_Export',
+      '--outdir', $out, $source
+    )
+    & $soffice @sofficeArgs
+    $pdf = Join-Path $out "$stem.pdf"
+    if (-not (Test-Path $pdf)) { throw "[$Label] conversion produced no PDF for $fixture" }
+    $bytes = (Get-Item $pdf).Length
+    if ($bytes -lt 1024) { throw "[$Label] PDF for $fixture is too small: $bytes bytes" }
+
+    # A pruned engine can emit a structurally valid but empty PDF, so parse it with
+    # the same pdf.js build the app renders with and require real content.
+    $statsJson = & node (Join-Path $repoRoot 'scripts\count-pdf-pages.mjs') $pdf
+    if ($LASTEXITCODE -ne 0) { throw "[$Label] could not parse the PDF produced for $fixture" }
+    $stats = $statsJson | ConvertFrom-Json
+    $expected = $expectedPages[$fixture]
+    Write-Host ("  [{0}] {1}: {2} bytes, {3} pages, {4} ops (expected {5})" -f $Label, $fixture, $bytes, $stats.pages, $stats.firstPageOps, $expected)
+    if ($stats.pages -ne $expected) {
+      throw "[$Label] $fixture produced $($stats.pages) pages, expected $expected"
+    }
+    if ($stats.firstPageOps -lt 1) {
+      throw "[$Label] $fixture produced a page with no drawable content"
+    }
   }
 }
+
+# Baseline: the untouched tree must convert before any pruning, otherwise a later
+# failure cannot be attributed to pruning.
+Write-Host 'smoke: baseline (unpruned)'
+Invoke-Smoke -Label 'baseline' -Fixtures @('smoke.pptx')
+
+# Prune in stages, verifying after each one so a regression names its own cause.
+$stages = @('docs', 'junk', 'modules', 'ui', 'authoring', 'pdfimport', 'locales', 'fonts', 'runtime')
+foreach ($stage in $stages) {
+  & $pruneScript -InstallRoot $installRoot -Stage $stage
+  Write-Host "smoke: after $stage"
+  Invoke-Smoke -Label $stage -Fixtures @('smoke.pptx')
+}
+
+& $pruneScript -InstallRoot $installRoot -Stage 'report'
+
+# Final gate: every fixture must convert with the fully pruned tree.
+Write-Host 'smoke: final (all fixtures)'
+Invoke-Smoke -Label 'final' -Fixtures $fixtures
 if (Test-Path $OutFile) { Remove-Item -Force $OutFile }
 $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
 if (-not (Test-Path $sevenZip)) {
