@@ -52,7 +52,7 @@ export const zh = {
     magnifier: '放大镜',
     blackout: '黑屏',
     overview: '幻灯片总览',
-    more: '更多',
+    board: '白板',
     endShow: '结束放映',
     endOfDeck: '已经是最后一页',
     startOfDeck: '已经是第一页',
@@ -65,11 +65,11 @@ export const zh = {
       ['数字 + Enter', '跳到指定页'],
       ['B / .', '黑屏'],
       ['W', '白屏'],
+      ['D', '白板（可在空白画布上批注）'],
       ['O', '幻灯片总览'],
       ['L', '放大镜'],
       ['E', '橡皮'],
-      ['F', '切换全屏'],
-      ['Esc', '结束放映'],
+      ['Esc', '结束放映 / 关闭白板'],
       ['?', '显示本帮助']
     ] as Array<[string, string]>
   },
