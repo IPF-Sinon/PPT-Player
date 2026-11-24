@@ -18,11 +18,11 @@ env:
 
 jobs:
   ci:
-    name: run ci
+    name: verify
     uses: ./.github/workflows/ci.yml
 
   publish:
-    name: package and publish
+    name: publish
     needs: [ci]
     runs-on: windows-latest
     steps:
@@ -37,6 +37,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Cache Electron binary
+        uses: actions/cache@v5
+        with:
+          path: ~/AppData/Local/electron/Cache
+          key: electron-45.3.4-${{ runner.os }}
+
       - run: pnpm install --frozen-lockfile
 
       - uses: actions/download-artifact@v6
@@ -50,6 +56,7 @@ jobs:
           Expand-Archive -Path "${{ runner.temp }}\lo-artifact\lo-engine.zip" -DestinationPath "${{ runner.temp }}\lo-tree" -Force
           New-Item -ItemType Directory -Force -Path resources/lo | Out-Null
           Copy-Item -Path "${{ runner.temp }}\lo-tree\*" -Destination resources/lo -Recurse -Force
+          if (-not (Test-Path resources/lo/program/soffice.com)) { throw 'bundled soffice.com missing' }
 
       - run: pnpm build
 
@@ -59,20 +66,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win nsis zip --x64 --publish never
 
-      - name: Verify sizes
+      - name: Verify artifacts
         shell: pwsh
         run: |
           Get-ChildItem -Path dist -File | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
           $setup = Get-ChildItem -Path dist -Filter 'PPTPlayer-Setup-*.exe' | Select-Object -First 1
-          if ($null -eq $setup) { throw 'installer missing' }
+          if ($null -eq $setup) { throw 'NSIS installer missing' }
           if ($setup.Length -gt 900MB) { throw "installer too large: $([math]::Round($setup.Length/1MB,1)) MB" }
 
-      - name: Checksums
+      - name: Write checksums
         shell: pwsh
         run: |
           $lines = Get-ChildItem -Path dist -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object {
-            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$h  $($_.Name)"
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
           }
           $lines | Set-Content -Path dist/sha256sums.txt -Encoding utf8
           Get-Content dist/sha256sums.txt
@@ -82,6 +89,7 @@ jobs:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           name: PPT Player ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           draft: true
+          generate_release_notes: true
           files: |
             dist/*.exe
             dist/*.zip
