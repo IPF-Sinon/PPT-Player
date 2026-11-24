@@ -27,24 +27,26 @@ async function findPlayback(): Promise<Page | null> {
 }
 
 /**
- * Click a chrome control and retry until the expected page label appears.
- * The chrome fades after 2.5s idle, so a click can land while it is inert.
+ * Click a chrome control and retry until the page label changes.
+ *
+ * The chrome fades out after 2.5s of idle and stops receiving pointer events, so
+ * a click can silently land on the slide instead. Move the mouse to wake it, wait
+ * for the control to be fully opaque, then click.
  */
 async function clickUntilPage(page: Page, testId: string, expected: string): Promise<void> {
   await expect
     .poll(
       async () => {
-        await page.mouse.move(640, 360)
-        await page
-          .getByTestId(testId)
-          .click({ timeout: 2000 })
-          .catch(() => undefined)
+        await page.mouse.move(500, 400).catch(() => undefined)
+        const control = page.getByTestId(testId)
+        await expect(control).toHaveCSS('opacity', '1', { timeout: 3000 }).catch(() => undefined)
+        await control.click({ timeout: 3000 }).catch(() => undefined)
         return await page
           .getByTestId('side-page-left')
           .textContent()
           .catch(() => '')
       },
-      { timeout: 60_000, intervals: [200, 400, 800] }
+      { timeout: 90_000, intervals: [500, 1000, 2000] }
     )
     .toBe(expected)
 }
