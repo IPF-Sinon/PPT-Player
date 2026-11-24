@@ -476,7 +476,7 @@ export default function PlaybackPage() {
         }}
         onToggleOverview={() => setOverviewOpen((v) => !v)}
         onEnd={() => void endShow()}
-        visible={chromeVisible}
+        visible={chromeVisible && !overviewOpen}
         dark={dark}
       />
 
