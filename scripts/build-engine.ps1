@@ -75,13 +75,20 @@ Write-Host "LibreOffice tree root: $installRoot"
 $soffice = Join-Path $installRoot 'program\soffice.com'
 if (-not (Test-Path $soffice)) { throw "soffice.com missing after prune: $soffice" }
 
-# Smoke gate: the pruned tree must actually convert the fixtures we can build
-# in pure Node (OOXML + ODF). Legacy .ppt is covered by the e2e job.
+# Smoke gate: the pruned tree must still convert every fixture the app ships
+# tests for. Aggressive pruning is only safe if this passes, so it runs against
+# the same decks the e2e suite uses.
 $smokeDir = Join-Path $WorkDir 'smoke'
 if (Test-Path $smokeDir) { Remove-Item -Recurse -Force $smokeDir }
 New-Item -ItemType Directory -Force -Path $smokeDir | Out-Null
 
-$fixtures = @('smoke.pptx', 'smoke.odp')
+$fixtures = @('smoke.pptx', 'smoke.odp', 'deck-16x9.pptx', 'deck-4x3.pptx')
+$expectedPages = @{
+  'smoke.pptx'     = 1
+  'smoke.odp'      = 2
+  'deck-16x9.pptx' = 3
+  'deck-4x3.pptx'  = 2
+}
 foreach ($fixture in $fixtures) {
   $source = Join-Path $repoRoot "tests\fixtures\$fixture"
   if (-not (Test-Path $source)) { throw "missing smoke fixture $source" }
@@ -102,12 +109,24 @@ foreach ($fixture in $fixtures) {
   $pdf = Join-Path $out "$stem.pdf"
   if (-not (Test-Path $pdf)) { throw "smoke conversion produced no PDF for $fixture" }
   $bytes = (Get-Item $pdf).Length
-  Write-Host "  -> $bytes bytes"
   if ($bytes -lt 1024) { throw "smoke PDF for $fixture is too small: $bytes bytes" }
-}
 
-# Verify the tree no longer depends on anything outside itself: rename the
-# administrative source away and convert once more.
+  # A pruned engine can still emit a valid but empty PDF. Parse it with the same
+  # pdf.js build the app renders with, then require the exact page count and a
+  # non-empty first page, which catches a dropped Impress filter or a broken
+  # renderer that a file-size check would miss.
+  $statsJson = & node (Join-Path $repoRoot 'scripts\count-pdf-pages.mjs') $pdf
+  if ($LASTEXITCODE -ne 0) { throw "could not parse the PDF produced for $fixture" }
+  $stats = $statsJson | ConvertFrom-Json
+  $expected = $expectedPages[$fixture]
+  Write-Host "  -> $bytes bytes, $($stats.pages) pages, $($stats.firstPageOps) ops (expected $expected pages)"
+  if ($stats.pages -ne $expected) {
+    throw "smoke conversion of $fixture produced $($stats.pages) pages, expected $expected"
+  }
+  if ($stats.firstPageOps -lt 1) {
+    throw "smoke conversion of $fixture produced a page with no drawable content"
+  }
+}
 if (Test-Path $OutFile) { Remove-Item -Force $OutFile }
 $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
 if (-not (Test-Path $sevenZip)) {
@@ -122,6 +141,8 @@ if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
 $zipMb = [math]::Round((Get-Item $OutFile).Length / 1MB, 1)
 Write-Host "Engine zip size: $zipMb MB"
 if ($zipMb -lt 40) { throw "engine zip looks too small: $zipMb MB" }
+# Budget guard: a regression in pruning would silently ship a huge installer.
+if ($zipMb -gt 160) { throw "engine zip is $zipMb MB, over the 160 MB budget" }
 
 $marker = Join-Path $WorkDir 'engine-info.json'
 @{
