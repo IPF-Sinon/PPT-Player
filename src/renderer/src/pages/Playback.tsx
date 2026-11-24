@@ -362,6 +362,10 @@ export default function PlaybackPage() {
       data-blackout={blackout}
       data-whiteout={whiteout}
       onMouseMove={pokeChrome}
+      onClick={() => {
+        // Blanked surfaces hide the chrome, so the root takes the restoring click.
+        if (blackout || whiteout) dismissBlank()
+      }}
     >
       <div
         className="slide-wrap"
