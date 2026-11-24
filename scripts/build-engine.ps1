@@ -82,6 +82,20 @@ $expectedPages = @{
 
 $smokeDir = Join-Path $WorkDir 'smoke'
 
+# Runs soffice with a hard timeout. A pruned tree can make LibreOffice hang while
+# loading a component, so every probe must be able to give up.
+function Invoke-Soffice {
+  param([string]$SofficeExe, [string[]]$Arguments, [int]$TimeoutSeconds = 90)
+
+  $proc = Start-Process -FilePath $SofficeExe -ArgumentList $Arguments -PassThru -NoNewWindow
+  if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+    Write-Host "    soffice exceeded $TimeoutSeconds s, killing it"
+    & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
+    return $false
+  }
+  return $true
+}
+
 function Invoke-Smoke {
   param([string]$Label, [string[]]$Fixtures)
 
@@ -103,7 +117,9 @@ function Invoke-Smoke {
       '--convert-to', 'pdf:impress_pdf_Export',
       '--outdir', $out, $source
     )
-    & $soffice @sofficeArgs
+    if (-not (Invoke-Soffice -SofficeExe $soffice -Arguments $sofficeArgs)) {
+      throw "[$Label] conversion timed out for $fixture"
+    }
     $pdf = Join-Path $out "$stem.pdf"
     if (-not (Test-Path $pdf)) { throw "[$Label] conversion produced no PDF for $fixture" }
     $bytes = (Get-Item $pdf).Length
