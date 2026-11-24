@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -116,11 +116,14 @@ export async function runLibreOffice(opts: LoRunOptions): Promise<LoRunResult> {
       clearTimeout(timer)
       opts.signal?.removeEventListener('abort', onAbort)
       rmSync(profileDir, { recursive: true, force: true })
-      const pdfPath = join(opts.outDir, 'deck.pdf')
-      const produced = existsSync(pdfPath) && statSync(pdfPath).size > 1024
+
+      // soffice names its output after the source file, so find whatever PDF it
+      // produced and normalise it to deck.pdf.
+      const pdfPath = collectPdf(opts.outDir)
+      const produced = pdfPath !== ''
       resolve({
         ok: produced && !timedOut,
-        pdfPath: produced ? pdfPath : '',
+        pdfPath,
         exitCode,
         stderr,
         timedOut,
@@ -134,6 +137,39 @@ export async function runLibreOffice(opts: LoRunOptions): Promise<LoRunResult> {
     })
     child.on('close', (code) => finish(code))
   })
+}
+
+/**
+ * Find the PDF soffice wrote into `outDir` and rename it to deck.pdf. Returns the
+ * absolute path, or an empty string when no usable PDF was produced.
+ */
+export function collectPdf(outDir: string): string {
+  const target = join(outDir, 'deck.pdf')
+  if (existsSync(target) && statSync(target).size > 1024) return target
+
+  let candidates: string[] = []
+  try {
+    candidates = readdirSync(outDir).filter((name) => name.toLowerCase().endsWith('.pdf'))
+  } catch {
+    return ''
+  }
+
+  for (const name of candidates) {
+    const full = join(outDir, name)
+    let size = 0
+    try {
+      size = statSync(full).size
+    } catch {
+      continue
+    }
+    if (size <= 1024) continue
+    if (full !== target) {
+      rmSync(target, { force: true })
+      renameSync(full, target)
+    }
+    return target
+  }
+  return ''
 }
 
 /** Locate soffice.com inside a LibreOffice program directory. */
