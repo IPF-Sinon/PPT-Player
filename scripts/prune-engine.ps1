@@ -63,8 +63,11 @@ switch ($Stage) {
   }
 
   'ui' {
-    # A headless run never paints a dialog or toolbar.
-    Remove-Relative 'share\config\soffice.cfg'
+    # Measured: removing share/config/soffice.cfg breaks the headless export even
+    # though no dialog is ever painted, because the office bootstrap reads the
+    # dialog configuration while building its component context. Keep it.
+    #
+    # The icon themes, however, are pure bitmaps and are safe to drop.
     Get-ChildItem -Path (Join-Path $InstallRoot 'share\config') -Filter 'images_*.zip' -ErrorAction SilentlyContinue |
       ForEach-Object { Remove-Item -Force $_.FullName -ErrorAction SilentlyContinue }
   }
