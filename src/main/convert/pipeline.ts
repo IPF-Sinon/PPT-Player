@@ -164,6 +164,7 @@ export async function openDeck(
 
     if (!isPdf) {
       emit(deckId, 'convert', 0.25, '正在转换')
+      log.info('converting with LibreOffice', { engine: engine.path, source: filePath, out: cacheDir })
       const result = await runLibreOffice({
         sourcePath: filePath,
         outDir: cacheDir,
@@ -172,6 +173,13 @@ export async function openDeck(
         signal: options.signal
       })
       convertMs = result.durationMs
+      log.info('conversion finished', {
+        ok: result.ok,
+        ms: result.durationMs,
+        exitCode: result.exitCode,
+        timedOut: result.timedOut,
+        stderr: result.stderr.slice(0, 400)
+      })
       if (!result.ok) {
         rmSync(cacheDir, { recursive: true, force: true })
         if (result.timedOut) throw new AppError('ETIMEOUT', '转换超时，请重试', result.stderr.slice(0, 2000))

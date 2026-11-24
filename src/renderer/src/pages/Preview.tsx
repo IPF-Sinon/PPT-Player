@@ -50,7 +50,9 @@ export default function PreviewPage() {
       })
 
       try {
+        console.log('[preview] opening', filePath)
         const result = await window.api.open(filePath)
+        console.log('[preview] open result', result.ok, result.ok ? result.info.deckId : result.error.code)
         if (token !== openToken.current) return
         if (!result.ok) {
           store.setError({ message: result.error.message, detail: result.error.detail })
@@ -70,15 +72,22 @@ export default function PreviewPage() {
   const mountDeck = useCallback(
     async (info: DeckInfo): Promise<void> => {
       const url = (await window.api.deckUrl(info.deckId)) ?? ''
-      const doc = await loadPdf(url)
-      const sizes = await readPageSizes(doc)
-      const updated = await window.api.reportMetrics(info.deckId, doc.numPages, sizes)
-      const finalInfo = updated ?? { ...info, pageCount: doc.numPages, pageSizes: sizes }
-      store.setDeck({ info: finalInfo, doc, url })
-      store.setPage(0)
-      const ink = await window.api.loadInk(info.deckId)
-      store.setInk(ink)
-      document.title = zh.windowTitle(info.sourcePath.split(/[\\/]/).pop() ?? '')
+      console.log('[preview] mounting deck', info.deckId, url)
+      try {
+        const doc = await loadPdf(url)
+        const sizes = await readPageSizes(doc)
+        const updated = await window.api.reportMetrics(info.deckId, doc.numPages, sizes)
+        const finalInfo = updated ?? { ...info, pageCount: doc.numPages, pageSizes: sizes }
+        store.setDeck({ info: finalInfo, doc, url })
+        store.setPage(0)
+        const ink = await window.api.loadInk(info.deckId)
+        store.setInk(ink)
+        document.title = zh.windowTitle(info.sourcePath.split(/[\\/]/).pop() ?? '')
+        console.log('[preview] deck ready', doc.numPages, 'pages')
+      } catch (err) {
+        console.error('[preview] failed to open the converted PDF', err)
+        store.setError({ message: '无法解析转换后的 PDF', detail: String(err) })
+      }
     },
     [store]
   )

@@ -54,6 +54,8 @@ test.afterAll(async () => {
 test('1. preview page opens the deck passed on the command line', async () => {
   await expect(preview.getByTestId('preview-page')).toBeVisible()
 
+
+
   // Wait for the deck name, and report the error card text if it never appears.
   await expect
     .poll(
@@ -64,6 +66,12 @@ test('1. preview page opens the deck passed on the command line', async () => {
       { timeout: 180_000 }
     )
     .toBe(deckName)
+
+  // If the deck never mounts, capture what the UI is actually showing.
+  const errorText = await preview
+    .evaluate("(document.querySelector('[data-testid=\"error-overlay\"]')||{}).textContent || ''")
+    .catch(() => '')
+  if (errorText) console.log('[e2e] error card:', errorText)
 
   await expect(preview.getByTestId('deck-format')).toHaveText('PPTX')
   await preview.screenshot({ path: join(shots, 'preview.png') })
