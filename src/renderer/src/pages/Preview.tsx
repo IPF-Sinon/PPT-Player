@@ -84,6 +84,31 @@ export default function PreviewPage() {
   )
 
   useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+      const total = useAppStore.getState().deck.info?.pageCount ?? 0
+      if (total === 0) return
+      const current = useAppStore.getState().currentPage
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'PageDown') {
+        event.preventDefault()
+        useAppStore.getState().setPage(Math.min(total - 1, current + 1))
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'PageUp') {
+        event.preventDefault()
+        useAppStore.getState().setPage(Math.max(0, current - 1))
+      } else if (event.key === 'Home') {
+        event.preventDefault()
+        useAppStore.getState().setPage(0)
+      } else if (event.key === 'End') {
+        event.preventDefault()
+        useAppStore.getState().setPage(total - 1)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
     void refreshEngine()
     void refreshRecent()
     const off = window.api.onExternalOpen((path) => {
@@ -110,10 +135,10 @@ export default function PreviewPage() {
     if (path) await openFile(path)
   }
 
-  const startShow = async (): Promise<void> => {
+  const startShow = async (fromStart = false): Promise<void> => {
     const info = store.deck.info
     if (!info) return
-    await window.api.enterPlayback(info.deckId, store.currentPage)
+    await window.api.enterPlayback(info.deckId, fromStart ? 0 : store.currentPage)
   }
 
   const pageCount = store.deck.info?.pageCount ?? 0
@@ -364,14 +389,20 @@ export default function PreviewPage() {
           >
             <Info size={16} />
           </button>
-          <button type="button" className="btn" disabled={!info} onClick={() => void startShow()}>
+          <button
+            type="button"
+            className="btn"
+            disabled={!info}
+            onClick={() => void startShow(false)}
+            data-testid="start-here"
+          >
             {zh.preview.startFromHere}
           </button>
           <button
             type="button"
             className="btn btn-primary"
             disabled={!info}
-            onClick={() => void startShow()}
+            onClick={() => void startShow(true)}
             data-testid="start-show"
           >
             <Play size={14} />

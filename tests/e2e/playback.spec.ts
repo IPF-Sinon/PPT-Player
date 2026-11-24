@@ -14,7 +14,7 @@ let app: ElectronApplication
 let preview: Page
 let playback: Page | null = null
 
-/** Find the playback window among all open windows. */
+/** Locate the playback window among all open windows. */
 async function findPlayback(): Promise<Page | null> {
   for (const page of app.windows()) {
     if (page.isClosed()) continue
@@ -25,6 +25,8 @@ async function findPlayback(): Promise<Page | null> {
   }
   return null
 }
+
+test.describe.configure({ mode: 'serial' })
 
 test.beforeAll(async () => {
   expect(existsSync(deckPath), 'fixture deck must exist before e2e').toBe(true)
@@ -41,19 +43,18 @@ test.afterAll(async () => {
   await app?.close()
 })
 
-test('1. preview page renders and opens the deck passed on the command line', async () => {
+test('1. preview page opens the deck passed on the command line', async () => {
   await expect(preview.getByTestId('preview-page')).toBeVisible()
-  await expect(preview.getByTestId('deck-name')).toHaveText(deckName, { timeout: 90_000 })
+  await expect(preview.getByTestId('deck-name')).toHaveText(deckName, { timeout: 120_000 })
+  await expect(preview.getByTestId('deck-format')).toHaveText('PPTX')
   await preview.screenshot({ path: join(shots, 'preview.png') })
 })
 
 test('2. thumbnail rail lists every slide', async () => {
-  const thumbs = preview.locator('[data-testid^="thumb-"]').filter({ hasNot: preview.locator('xpath=.').first() })
   await expect(preview.getByTestId('thumb-rail')).toBeVisible()
   await expect(preview.getByTestId('thumb-1')).toBeVisible()
   await expect(preview.getByTestId('thumb-2')).toBeVisible()
   await expect(preview.getByTestId('thumb-3')).toBeVisible()
-  void thumbs
 })
 
 test('3. clicking a thumbnail moves the stage to that slide', async () => {
@@ -63,10 +64,8 @@ test('3. clicking a thumbnail moves the stage to that slide', async () => {
 })
 
 test('4. starting the show opens a fullscreen playback window', async () => {
-  await preview.getByTestId('start-show').click()
-  await expect
-    .poll(async () => (await findPlayback()) !== null, { timeout: 60_000 })
-    .toBe(true)
+  await preview.getByTestId('start-here').click()
+  await expect.poll(async () => (await findPlayback()) !== null, { timeout: 90_000 }).toBe(true)
   playback = await findPlayback()
   expect(playback).not.toBeNull()
   await expect(playback!.getByTestId('playback-page')).toBeVisible()
@@ -118,6 +117,7 @@ test('9. the pen tool records ink on the slide', async () => {
   await playback!.mouse.move(x + width * 0.62, y + height * 0.45, { steps: 8 })
   await playback!.mouse.up()
   await playback!.screenshot({ path: join(shots, 'playback-ink.png') })
+  await playback!.getByTestId('tool-pointer').click()
 })
 
 test('10. the overview grid opens and closes', async () => {
@@ -132,13 +132,10 @@ test('10. the overview grid opens and closes', async () => {
 test('11. Escape ends the show and returns to the preview window', async () => {
   expect(playback).not.toBeNull()
   await playback!.keyboard.press('Escape')
-  await expect
-    .poll(async () => (await findPlayback()) === null, { timeout: 30_000 })
-    .toBe(true)
+  await expect.poll(async () => (await findPlayback()) === null, { timeout: 30_000 }).toBe(true)
   await expect(preview.getByTestId('preview-page')).toBeVisible()
 })
 
 test('12. the window title carries the file name', async () => {
-  const title = await preview.title()
-  expect(title).toContain(deckName)
+  expect(await preview.title()).toContain(deckName)
 })

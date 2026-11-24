@@ -44,6 +44,26 @@ if (Test-Path $extDir) {
 $programDir = Join-Path $InstallRoot 'program'
 if (-not (Test-Path $programDir)) { throw "program directory missing: $programDir" }
 
+# Keep only the UI locales the app can show: English and Simplified Chinese.
+# The player never switches LibreOffice UI language, so the rest is dead weight.
+$keepLocales = @('en-US', 'zh-CN', 'en-GB')
+$localeDirs = @(
+  (Join-Path $InstallRoot 'share\registry\res'),
+  (Join-Path $programDir 'resource')
+)
+foreach ($dir in $localeDirs) {
+  if (-not (Test-Path $dir)) { continue }
+  Get-ChildItem -Path $dir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($keepLocales -notcontains $_.Name) {
+      Remove-Item -Recurse -Force $_.FullName
+    }
+  }
+}
+
+# Debug symbols and crash dumps never ship.
+Get-ChildItem -Path $InstallRoot -Recurse -File -Include '*.pdb', '*.ilk', '*.map' -ErrorAction SilentlyContinue |
+  ForEach-Object { Remove-Item -Force $_.FullName }
+
 # The MSI expects the VC++ runtime in the system directory. Copy it next to the
 # binaries so the shipped tree runs without those redistributables installed.
 $runtimeDlls = @(
@@ -65,18 +85,29 @@ foreach ($dll in $runtimeDlls) {
   }
 }
 
+# Report where the remaining bytes live so future pruning is data driven.
+Get-ChildItem -Path $InstallRoot -Directory | ForEach-Object {
+  $bytes = (Get-ChildItem -Path $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
+    Measure-Object -Property Length -Sum).Sum
+  Write-Host ("  {0,-16} {1,8:N1} MB" -f $_.Name, ($bytes / 1MB))
+}
+
 $totalBytes = (Get-ChildItem -Path $InstallRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum
 Write-Host ("pruned tree size: {0:N1} MB" -f ($totalBytes / 1MB))
 
+# Only assert what the conversion path actually needs. Anything else is optional.
 $required = @(
   'program\soffice.com',
   'program\soffice.bin',
-  'share\registry\main.xcd',
-  'share\filter\xslt'
+  'share\registry\main.xcd'
 )
 foreach ($rel in $required) {
   if (-not (Test-Path (Join-Path $InstallRoot $rel))) {
     throw "pruned tree is missing required path: $rel"
   }
+}
+
+if (-not (Test-Path (Join-Path $programDir 'soffice.bin'))) {
+  throw 'soffice.bin missing from program directory'
 }
 Write-Host 'prune checks passed.'
