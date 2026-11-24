@@ -32,6 +32,12 @@
   visibility: hidden;
 }
 
+/* While blanked the whole surface stays clickable so a mouse user can return. */
+.playback[data-blackout='true'],
+.playback[data-whiteout='true'] {
+  cursor: pointer;
+}
+
 .slide-wrap {
   position: absolute;
   inset: 0;

@@ -122,12 +122,15 @@ test('7. both side nav stacks are clickable', async () => {
   await expect(playback!.getByTestId('side-page-left')).toHaveText('2/3')
 })
 
-test('8. the bottom toolbar toggles blackout', async () => {
+test('8. blackout hides the slide and any click restores it', async () => {
   expect(playback).not.toBeNull()
   await playback!.getByTestId('tool-blackout').click()
   await expect(playback!.getByTestId('playback-page')).toHaveAttribute('data-blackout', 'true')
-  await playback!.getByTestId('tool-blackout').click()
+  await playback!.screenshot({ path: join(shots, 'playback-blackout.png') })
+  // The chrome is hidden while blanked, so a click on the surface must restore it.
+  await playback!.mouse.click(20, 20)
   await expect(playback!.getByTestId('playback-page')).toHaveAttribute('data-blackout', 'false')
+  await expect(playback!.getByTestId('tool-blackout')).toBeVisible()
 })
 
 test('9. the pen tool records ink on the slide', async () => {

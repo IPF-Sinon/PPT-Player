@@ -290,6 +290,12 @@ export default function PlaybackPage() {
   const currentStrokes = ink.find((p) => p.pageIndex === pageIndex)?.strokes ?? []
 
   const onStageClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    // A click always dismisses blackout / whiteout, like PowerPoint.
+    if (blackout || whiteout) {
+      setBlackout(false)
+      setWhiteout(false)
+      return
+    }
     if (tool !== 'pointer') return
     const rect = event.currentTarget.getBoundingClientRect()
     const ratio = (event.clientX - rect.left) / rect.width
@@ -317,6 +323,7 @@ export default function PlaybackPage() {
       data-blackout={blackout}
       data-whiteout={whiteout}
       onMouseMove={pokeChrome}
+      onClick={blackout || whiteout ? () => { setBlackout(false); setWhiteout(false) } : undefined}
     >
       <div className="slide-wrap" ref={stageRef}>
         <div
