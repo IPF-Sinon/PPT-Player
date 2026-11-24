@@ -99,6 +99,10 @@ export default function PlaybackPage() {
     setWhiteout(false)
   }, [])
 
+  // Boot exactly once. This effect seeds the shared store and the local page
+  // index, so it must never re-run. Depending on the whole store here made it
+  // restart on every store write and snap the deck back to its opening slide.
+  // Store actions are read through getState() so the deps can stay empty.
   useEffect(() => {
     let cancelled = false
     const boot = async (): Promise<void> => {
@@ -113,8 +117,9 @@ export default function PlaybackPage() {
       const doc = await loadPdf(url)
       const sizes = await readPageSizes(doc)
       if (cancelled) return
-      store.setDeck({ info: { ...info, pageCount: doc.numPages, pageSizes: sizes }, doc, url })
-      store.setPage(ctx.pageIndex)
+      const api = useAppStore.getState()
+      api.setDeck({ info: { ...info, pageCount: doc.numPages, pageSizes: sizes }, doc, url })
+      api.setPage(ctx.pageIndex)
       setPageIndex(Math.min(ctx.pageIndex, Math.max(0, doc.numPages - 1)))
       const saved = await window.api.loadInk(ctx.deckId)
       if (!cancelled) setInk(saved)
@@ -126,7 +131,7 @@ export default function PlaybackPage() {
     return () => {
       cancelled = true
     }
-  }, [store])
+  }, [])
 
   useEffect(() => {
     pokeChrome()
