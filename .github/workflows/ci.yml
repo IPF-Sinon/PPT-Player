@@ -200,7 +200,9 @@ jobs:
 
   package:
     name: package installer
-    needs: [engine, build]
+    # Serialised after e2e on purpose: 7z compressing a 1 GB engine tree starves
+    # the CPU and makes the UI assertions time out.
+    needs: [engine, build, e2e]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:

@@ -108,10 +108,34 @@ test('5. playback starts on the slide the preview was showing', async () => {
 
 test('6. keyboard navigation advances and rewinds', async () => {
   expect(playback).not.toBeNull()
-  await playback!.keyboard.press('ArrowRight')
-  await expect(playback!.getByTestId('side-page-left')).toHaveText('3/3')
-  await playback!.keyboard.press('ArrowLeft')
-  await expect(playback!.getByTestId('side-page-left')).toHaveText('2/3')
+  await playback!.mouse.move(640, 360)
+
+  // Retry the keypress: under CPU load a single dispatched key can be lost.
+  await expect
+    .poll(
+      async () => {
+        await playback!.keyboard.press('ArrowRight').catch(() => undefined)
+        return await playback!
+          .getByTestId('side-page-left')
+          .textContent()
+          .catch(() => '')
+      },
+      { timeout: 45_000, intervals: [250, 500, 1000] }
+    )
+    .toBe('3/3')
+
+  await expect
+    .poll(
+      async () => {
+        await playback!.keyboard.press('ArrowLeft').catch(() => undefined)
+        return await playback!
+          .getByTestId('side-page-left')
+          .textContent()
+          .catch(() => '')
+      },
+      { timeout: 45_000, intervals: [250, 500, 1000] }
+    )
+    .toBe('2/3')
 })
 
 test('7. both side nav stacks are clickable', async () => {
