@@ -1,10 +1,13 @@
-# Removes everything the player does not need from an administrative install tree.
+# Removes everything the player does not need from an administrative install tree
+# and makes the tree self-contained (VC runtime DLLs copied next to soffice.com).
 param(
   [Parameter(Mandatory = $true)][string]$InstallRoot
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+if (-not (Test-Path $InstallRoot)) { throw "install root missing: $InstallRoot" }
 
 $targets = @(
   'help',
@@ -16,7 +19,8 @@ $targets = @(
   'share\autotext',
   'share\extensions\wiki-publisher',
   'share\extensions\nlpsolver',
-  'share\extensions\solver'
+  'share\extensions\solver',
+  'share\extensions\beanshell'
 )
 
 foreach ($rel in $targets) {
@@ -27,25 +31,52 @@ foreach ($rel in $targets) {
   }
 }
 
-# Drop non-essential language packs and dictionaries but keep the UI resources.
-$dicDir = Join-Path $InstallRoot 'share\extensions\dict-*'
-Get-ChildItem -Path $dicDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-  Write-Host "prune dict: $($_.Name)"
-  Remove-Item -Recurse -Force $_.FullName
+# Dictionary extensions are large and only used by the spell checker.
+$extDir = Join-Path $InstallRoot 'share\extensions'
+if (Test-Path $extDir) {
+  Get-ChildItem -Path $extDir -Directory -Filter 'dict-*' -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      Write-Host "prune dict: $($_.Name)"
+      Remove-Item -Recurse -Force $_.FullName
+    }
 }
 
-# Visual C++ runtime: the administrative install keeps it under Windows/System.
-$sysDir = Join-Path $InstallRoot 'Windows\System'
 $programDir = Join-Path $InstallRoot 'program'
-if (Test-Path $sysDir) {
-  Get-ChildItem -Path $sysDir -Filter 'msvc*.dll' | ForEach-Object {
-    $dest = Join-Path $programDir $_.Name
-    if (-not (Test-Path $dest)) {
-      Write-Host "runtime: $($_.Name) -> program"
-      Copy-Item $_.FullName $dest
-    }
+if (-not (Test-Path $programDir)) { throw "program directory missing: $programDir" }
+
+# The MSI expects the VC++ runtime in the system directory. Copy it next to the
+# binaries so the shipped tree runs without those redistributables installed.
+$runtimeDlls = @(
+  'msvcp140.dll',
+  'msvcp140_1.dll',
+  'msvcp140_2.dll',
+  'vcruntime140.dll',
+  'vcruntime140_1.dll',
+  'concrt140.dll'
+)
+$systemDir = Join-Path $env:SystemRoot 'System32'
+foreach ($dll in $runtimeDlls) {
+  $target = Join-Path $programDir $dll
+  if (Test-Path $target) { continue }
+  $source = Join-Path $systemDir $dll
+  if (Test-Path $source) {
+    Write-Host "runtime: $dll -> program"
+    Copy-Item -Path $source -Destination $target
   }
 }
 
 $totalBytes = (Get-ChildItem -Path $InstallRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum
 Write-Host ("pruned tree size: {0:N1} MB" -f ($totalBytes / 1MB))
+
+$required = @(
+  'program\soffice.com',
+  'program\soffice.bin',
+  'share\registry\main.xcd',
+  'share\filter\xslt'
+)
+foreach ($rel in $required) {
+  if (-not (Test-Path (Join-Path $InstallRoot $rel))) {
+    throw "pruned tree is missing required path: $rel"
+  }
+}
+Write-Host 'prune checks passed.'

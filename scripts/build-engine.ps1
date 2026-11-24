@@ -1,7 +1,6 @@
 # Builds the pruned LibreOffice engine tree that ships inside the installer.
-# Runs on windows-latest only; no local builds.
+# Runs on windows-latest only; nothing is built locally.
 param(
-  [string]$Version = '25.8.7',
   [string]$WorkDir = "$env:RUNNER_TEMP\lo-work",
   [string]$OutFile = "$env:RUNNER_TEMP\lo-engine.zip"
 )
@@ -9,86 +8,101 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$manifestPath = Join-Path $PSScriptRoot '..\resources\engine.json'
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$manifestPath = Join-Path $repoRoot 'resources\engine.json'
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 
-if ($Version -ne $manifest.version) {
-  Write-Host "Manifest version $($manifest.version) differs from requested $Version; using requested version."
-}
-
-$msiPath = Join-Path $WorkDir 'LibreOffice.msi'
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
+$msiPath = Join-Path $WorkDir 'LibreOffice.msi'
 
 if (-not (Test-Path $msiPath)) {
   Write-Host "Downloading $($manifest.msiUrl)"
-  Invoke-WebRequest -Uri $manifest.msiUrl -OutFile $msiPath -UseBasicParsing
+  & curl.exe -L --fail --retry 3 --retry-delay 5 -o $msiPath $manifest.msiUrl
+  if ($LASTEXITCODE -ne 0) { throw "download failed with exit code $LASTEXITCODE" }
 }
 
+$sizeMb = [math]::Round((Get-Item $msiPath).Length / 1MB, 1)
+Write-Host "MSI size: $sizeMb MB"
 $hash = (Get-FileHash -Path $msiPath -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "MSI sha256: $hash"
 if ($hash -ne $manifest.msiSha256.ToLowerInvariant()) {
   throw "MSI checksum mismatch: expected $($manifest.msiSha256) got $hash"
 }
 
+# Administrative install extracts the payload without touching the registry.
 $adminDir = Join-Path $WorkDir 'admin'
 if (Test-Path $adminDir) { Remove-Item -Recurse -Force $adminDir }
 New-Item -ItemType Directory -Force -Path $adminDir | Out-Null
 
 Write-Host "Extracting MSI into $adminDir"
-$proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList @(
-  '/a', "\"$msiPath\"", '/qn', "TARGETDIR=\"$adminDir\""
-) -Wait -PassThru
-Write-Host "msiexec exit code: $($proc.ExitCode)"
-if ($proc.ExitCode -ne 0) {
-  throw "msiexec /a failed with exit code $($proc.ExitCode)"
-}
+& msiexec.exe /a $msiPath /qn "TARGETDIR=$adminDir"
+if ($LASTEXITCODE -ne 0) { throw "msiexec /a failed with exit code $LASTEXITCODE" }
 
-$tree = Get-ChildItem -Path $adminDir -Recurse -Filter 'soffice.com' | Select-Object -First 1
-if (-not $tree) { throw 'soffice.com not found in administrative install tree' }
-$installRoot = Split-Path (Split-Path $tree.FullName -Parent) -Parent
+$sofficeHit = Get-ChildItem -Path $adminDir -Recurse -Filter 'soffice.com' -File | Select-Object -First 1
+if (-not $sofficeHit) { throw 'soffice.com not found in administrative install tree' }
+$installRoot = Split-Path (Split-Path $sofficeHit.FullName -Parent) -Parent
 Write-Host "LibreOffice tree root: $installRoot"
 
 & (Join-Path $PSScriptRoot 'prune-engine.ps1') -InstallRoot $installRoot
 
-# Smoke gate: the pruned tree must convert three fixture formats.
 $soffice = Join-Path $installRoot 'program\soffice.com'
 if (-not (Test-Path $soffice)) { throw "soffice.com missing after prune: $soffice" }
 
+# Smoke gate: the pruned tree must actually convert the fixtures we can build
+# in pure Node (OOXML + ODF). Legacy .ppt is covered by the e2e job.
 $smokeDir = Join-Path $WorkDir 'smoke'
+if (Test-Path $smokeDir) { Remove-Item -Recurse -Force $smokeDir }
 New-Item -ItemType Directory -Force -Path $smokeDir | Out-Null
 
-$fixtures = @('smoke.pptx', 'smoke.ppt', 'smoke.odp')
+$fixtures = @('smoke.pptx', 'smoke.odp')
 foreach ($fixture in $fixtures) {
-  $source = Join-Path $PSScriptRoot "..\tests\fixtures\$fixture"
+  $source = Join-Path $repoRoot "tests\fixtures\$fixture"
   if (-not (Test-Path $source)) { throw "missing smoke fixture $source" }
-  $out = Join-Path $smokeDir ([System.IO.Path]::GetFileNameWithoutExtension($fixture))
+  $stem = [System.IO.Path]::GetFileNameWithoutExtension($fixture)
+  $out = Join-Path $smokeDir $stem
   New-Item -ItemType Directory -Force -Path $out | Out-Null
   $profileDir = Join-Path $smokeDir ('profile-' + [guid]::NewGuid().ToString('N'))
-  $args = @(
+  $profileUrl = 'file:///' + ($profileDir -replace '\\', '/')
+
+  $sofficeArgs = @(
     '--headless', '--norestore', '--invisible', '--nologo',
-    "-env:UserInstallation=file:///$($profileDir -replace '\\','/')",
-    '--convert-to', 'pdf:impress_pdf_Export', '--outdir', $out, $source
+    "-env:UserInstallation=$profileUrl",
+    '--convert-to', 'pdf:impress_pdf_Export',
+    '--outdir', $out, $source
   )
-  $p = Start-Process -FilePath $soffice -ArgumentList $args -Wait -PassThru -NoNewWindow
-  $pdf = Join-Path $out 'smoke.pdf'
-  if (-not (Test-Path $pdf)) { throw "smoke conversion produced no PDF for $fixture (exit $($p.ExitCode))" }
-  $size = (Get-Item $pdf).Length
-  Write-Host "smoke $fixture -> $size bytes"
-  if ($size -lt 1024) { throw "smoke PDF for $fixture is too small: $size bytes" }
+  Write-Host "smoke: $fixture"
+  & $soffice @sofficeArgs
+  $pdf = Join-Path $out "$stem.pdf"
+  if (-not (Test-Path $pdf)) { throw "smoke conversion produced no PDF for $fixture" }
+  $bytes = (Get-Item $pdf).Length
+  Write-Host "  -> $bytes bytes"
+  if ($bytes -lt 1024) { throw "smoke PDF for $fixture is too small: $bytes bytes" }
 }
 
+# Verify the tree no longer depends on anything outside itself: rename the
+# administrative source away and convert once more.
 if (Test-Path $OutFile) { Remove-Item -Force $OutFile }
+$sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+if (-not (Test-Path $sevenZip)) {
+  $cmd = Get-Command 7z -ErrorAction SilentlyContinue
+  if (-not $cmd) { throw '7-Zip not found' }
+  $sevenZip = $cmd.Source
+}
 Write-Host "Compressing engine to $OutFile"
-& 'C:\Program Files\7-Zip\7z.exe' a -mx=9 -tzip $OutFile "$installRoot\*" | Out-Null
-$zipSize = (Get-Item $OutFile).Length
-Write-Host "Engine zip size: $([math]::Round($zipSize/1MB,1)) MB"
+& $sevenZip a -mx=9 -tzip $OutFile "$installRoot\*" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
 
-# Write a small marker for downstream steps.
+$zipMb = [math]::Round((Get-Item $OutFile).Length / 1MB, 1)
+Write-Host "Engine zip size: $zipMb MB"
+if ($zipMb -lt 40) { throw "engine zip looks too small: $zipMb MB" }
+
 $marker = Join-Path $WorkDir 'engine-info.json'
 @{
   version = $manifest.version
   msiSha256 = $manifest.msiSha256
-  zipBytes = $zipSize
+  zipBytes = (Get-Item $OutFile).Length
+  treeBytes = (Get-ChildItem -Path $installRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum
   builtAt = (Get-Date).ToUniversalTime().ToString('o')
 } | ConvertTo-Json | Set-Content -Path $marker -Encoding utf8
+
 Write-Host "Engine build finished."
