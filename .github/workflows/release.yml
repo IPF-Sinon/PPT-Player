@@ -72,7 +72,7 @@ jobs:
           Get-ChildItem -Path dist -File | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
           $setup = Get-ChildItem -Path dist -Filter 'PPTPlayer-Setup-*.exe' | Select-Object -First 1
           if ($null -eq $setup) { throw 'NSIS installer missing' }
-          if ($setup.Length -gt 900MB) { throw "installer too large: $([math]::Round($setup.Length/1MB,1)) MB" }
+          if ($setup.Length -gt 600MB) { throw "installer too large: $([math]::Round($setup.Length/1MB,1)) MB, budget is 600 MB" }
 
       - name: Write checksums
         shell: pwsh

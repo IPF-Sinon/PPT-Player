@@ -252,7 +252,7 @@ jobs:
           if ($null -eq $setup) { throw 'NSIS installer missing' }
           $setupMb = [math]::Round($setup.Length/1MB,1)
           Write-Host "installer: $setupMb MB"
-          if ($setup.Length -gt 900MB) { throw "installer too large: $setupMb MB" }
+          if ($setup.Length -gt 600MB) { throw "installer too large: $setupMb MB, budget is 600 MB" }
           $zip = Get-ChildItem -Path dist -Filter 'PPTPlayer-*-x64.zip' | Select-Object -First 1
           if ($null -eq $zip) { throw 'portable zip missing' }
 

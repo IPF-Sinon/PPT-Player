@@ -36,3 +36,13 @@
 - Windows 10 1809 及以上 / Windows 11，x64
 - 无需安装 Office、无需安装 LibreOffice（引擎内置）
 - 需要可写的用户数据目录（缓存与设置）
+## 实测产物
+
+在 GitHub Actions `windows-latest` 上实测（LibreOffice 25.8.7，裁剪后引擎约 1.0 GB 解包体积）：
+
+| 产物 | 体积 |
+| --- | --- |
+| `PPTPlayer-Setup-0.1.0-x64.exe`（NSIS 安装版） | 319.7 MB |
+| `PPTPlayer-0.1.0-x64.zip`（免安装版） | 404.5 MB |
+
+安装包体积预算是 600 MB，CI 会在超出时直接失败。
