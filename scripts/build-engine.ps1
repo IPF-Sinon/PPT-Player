@@ -151,6 +151,7 @@ foreach ($stage in $stages) {
   Invoke-Smoke -Label $stage -Fixtures @('smoke.pptx')
 }
 
+
 # Module removal is the risky part: mergedlo.dll is a monolith and some of these
 # libraries register services at startup. Test each candidate on its own and keep
 # only the ones that still convert, so the tree never ships a broken cut.

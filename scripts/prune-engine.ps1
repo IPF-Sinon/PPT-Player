@@ -82,12 +82,10 @@ switch ($Stage) {
   }
 
   'pdfimport' {
-    # The player renders PDFs with pdf.js, never with LibreOffice.
-    Remove-Relative 'share\xpdfimport'
-    foreach ($name in @('xpdfimport.exe', 'pdfiumlo.dll')) {
-      $target = Join-Path $programDir $name
-      if (Test-Path $target) { Remove-Item -Force $target -ErrorAction SilentlyContinue }
-    }
+    # Measured: removing the PDF import filter breaks the Impress export too, so
+    # it stays. Only the standalone converter binary is dropped.
+    $target = Join-Path $programDir 'xpdfimport.exe'
+    if (Test-Path $target) { Remove-Item -Force $target -ErrorAction SilentlyContinue }
   }
 
   'locales' {
