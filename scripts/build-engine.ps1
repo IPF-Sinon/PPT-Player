@@ -143,51 +143,57 @@ function Test-Smoke {
 Write-Host 'smoke: baseline (unpruned)'
 Invoke-Smoke -Label 'baseline' -Fixtures @('smoke.pptx')
 
-# Prune in stages, verifying after each one so a regression names its own cause.
-$stages = @('docs', 'junk', 'ui', 'authoring', 'pdfimport', 'locales', 'fonts')
-foreach ($stage in $stages) {
+# Safe stages first: nothing here is part of the conversion filter graph.
+foreach ($stage in @('docs', 'junk', 'ui', 'authoring', 'locales', 'fonts', 'runtime')) {
   & $pruneScript -InstallRoot $installRoot -Stage $stage
   Write-Host "smoke: after $stage"
   Invoke-Smoke -Label $stage -Fixtures @('smoke.pptx')
 }
 
-
-# Module removal is the risky part: mergedlo.dll is a monolith and some of these
-# libraries register services at startup. Test each candidate on its own and keep
-# only the ones that still convert, so the tree never ships a broken cut.
-$candidates = @(
-  'sclo.dll', 'scfiltlo.dll',
-  'swlo.dll', 'swuilo.dll', 'mswordlo.dll', 'sw_writerfilterlo.dll',
-  'Engine12.dll', 'dbaselo.dll',
-  'smlo.dll',
-  'mwaw.dll', 'wps.dll', 'etonyek.dll',
-  'CoinMP.dll'
+# Everything below is a file or directory that *might* be load-bearing. Probe each
+# one with a real conversion and restore it when the engine stops working, so the
+# shipped tree is derived from measurement rather than assumption.
+$probePaths = @(
+  'program\sclo.dll', 'program\scfiltlo.dll',
+  'program\swlo.dll', 'program\swuilo.dll',
+  'program\mswordlo.dll', 'program\sw_writerfilterlo.dll',
+  'program\Engine12.dll', 'program\dbaselo.dll',
+  'program\smlo.dll', 'program\mwaw.dll', 'program\wps.dll',
+  'program\etonyek.dll', 'program\CoinMP.dll',
+  'program\python311.dll', 'program\python-core-3.11.15',
+  'program\xpdfimport.exe', 'program\pdfiumlo.dll',
+  'program\classes',
+  'share\xpdfimport',
+  'share\extensions'
 )
+
+$dropped = @()
 $kept = @()
-foreach ($candidate in $candidates) {
-  $target = Join-Path $installRoot ('program\' + $candidate)
+foreach ($rel in $probePaths) {
+  $target = Join-Path $installRoot $rel
   if (-not (Test-Path $target)) { continue }
 
-  $backup = $target + '.bak'
+  $backup = $target + '.probe-bak'
   Move-Item -Path $target -Destination $backup -Force
   if (Test-Smoke -Fixtures @('smoke.pptx')) {
-    Write-Host "  drop $candidate"
-    Remove-Item -Force $backup -ErrorAction SilentlyContinue
-    $kept += $candidate
+    Write-Host "  drop $rel"
+    Remove-Item -Recurse -Force $backup -ErrorAction SilentlyContinue
+    $dropped += $rel
   } else {
-    Write-Host "  keep $candidate (conversion depends on it)"
+    Write-Host "  keep $rel (conversion depends on it)"
     Move-Item -Path $backup -Destination $target -Force
+    $kept += $rel
   }
 }
-Write-Host ("modules droppable: {0}" -f ($(if ($kept.Count) { $kept -join ', ' } else { 'none' })))
-& $pruneScript -InstallRoot $installRoot -Stage 'runtime'
-& $pruneScript -InstallRoot $installRoot -Stage 'report'
+Write-Host ("dropped: {0}" -f ($(if ($dropped.Count) { $dropped -join ', ' } else { 'none' })))
+Write-Host ("kept:    {0}" -f ($(if ($kept.Count) { $kept -join ', ' } else { 'none' })))
 
 & $pruneScript -InstallRoot $installRoot -Stage 'report'
 
 # Final gate: every fixture must convert with the fully pruned tree.
 Write-Host 'smoke: final (all fixtures)'
 Invoke-Smoke -Label 'final' -Fixtures $fixtures
+
 if (Test-Path $OutFile) { Remove-Item -Force $OutFile }
 $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
 if (-not (Test-Path $sevenZip)) {

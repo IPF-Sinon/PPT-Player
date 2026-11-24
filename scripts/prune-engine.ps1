@@ -44,30 +44,11 @@ switch ($Stage) {
     Remove-Relative 'LibreOffice.msi'
   }
 
-  'modules' {
-    # Only `impress_pdf_Export` ever runs. Calc, Writer, Base, Math and the legacy
-    # Mac/Works/Apple filters are separate shared libraries that never load.
-    $unused = @(
-      'sclo.dll', 'scfiltlo.dll',
-      'swlo.dll', 'swuilo.dll', 'mswordlo.dll', 'sw_writerfilterlo.dll',
-      'Engine12.dll', 'dbaselo.dll',
-      'smlo.dll',
-      'mwaw.dll', 'wps.dll', 'etonyek.dll',
-      'CoinMP.dll'
-    )
-    foreach ($name in $unused) {
-      $target = Join-Path $programDir $name
-      if (Test-Path $target) { Remove-Item -Force $target -ErrorAction SilentlyContinue }
-    }
-    Remove-Relative 'program\classes'
-  }
-
   'ui' {
-    # Measured: removing share/config/soffice.cfg breaks the headless export even
-    # though no dialog is ever painted, because the office bootstrap reads the
-    # dialog configuration while building its component context. Keep it.
-    #
-    # The icon themes, however, are pure bitmaps and are safe to drop.
+    # Measured: share/config/soffice.cfg must stay. The office bootstrap reads the
+    # dialog configuration while building its component context, so removing it
+    # breaks a headless export even though no dialog is ever painted. The icon
+    # themes are pure bitmaps and are safe to drop.
     Get-ChildItem -Path (Join-Path $InstallRoot 'share\config') -Filter 'images_*.zip' -ErrorAction SilentlyContinue |
       ForEach-Object { Remove-Item -Force $_.FullName -ErrorAction SilentlyContinue }
   }
@@ -79,13 +60,6 @@ switch ($Stage) {
     Remove-Relative 'share\autotext'
     Remove-Relative 'share\wizards'
     Remove-Relative 'share\basic'
-  }
-
-  'pdfimport' {
-    # Measured: removing the PDF import filter breaks the Impress export too, so
-    # it stays. Only the standalone converter binary is dropped.
-    $target = Join-Path $programDir 'xpdfimport.exe'
-    if (Test-Path $target) { Remove-Item -Force $target -ErrorAction SilentlyContinue }
   }
 
   'locales' {
