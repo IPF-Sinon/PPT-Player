@@ -203,7 +203,10 @@ jobs:
     # Serialised after e2e on purpose: 7z compressing a 1 GB engine tree starves
     # the CPU and makes the UI assertions time out.
     needs: [engine, build, e2e]
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    # `github.workflow` is the top-level workflow name. During a release this file
+    # runs as a reusable workflow and the release's own publish job does the
+    # packaging, so packaging here would build the same artifacts twice.
+    if: github.workflow == 'ci' && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7.0.1
