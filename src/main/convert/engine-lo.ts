@@ -70,9 +70,14 @@ export function pickProfileDir(profileRoot: string): string {
     }
   }
   // All slots are busy; fall back to an extra directory rather than failing.
-  const extra = join(profileRoot, 'slot-' + Date.now().toString(36))
-  mkdirSync(extra, { recursive: true })
-  return extra
+  // The name must be unique: a timestamp alone collides when two conversions start
+  // in the same millisecond, and they would then share one profile and corrupt it.
+  for (let attempt = 0; ; attempt++) {
+    const extra = join(profileRoot, 'slot-extra-' + Date.now().toString(36) + '-' + attempt)
+    if (existsSync(extra)) continue
+    mkdirSync(extra, { recursive: true })
+    return extra
+  }
 }
 
 /** Arguments for a headless Impress-to-PDF conversion. */

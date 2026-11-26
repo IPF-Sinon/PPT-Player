@@ -66,7 +66,9 @@ describe('large file detection', () => {
   // This is the regression that made every deck over 64 MB fail as corrupt-zip:
   // detection truncated the file to its first 8 MB, so the end-of-central-directory
   // record at the tail was never found.
-  it('classifies a deck larger than 64 MB from its real tail', () => {
+  // Building a 70 MB fixture dominates the runtime, especially under coverage
+  // instrumentation, so these two get their own budget.
+  it('classifies a deck larger than 64 MB from its real tail', { timeout: 60_000 }, () => {
     const bytes = pptxBytes(70 * 1024 * 1024)
     expect(bytes.length).toBeGreaterThan(64 * 1024 * 1024)
 
@@ -76,7 +78,7 @@ describe('large file detection', () => {
     expect(info.reason).toBeUndefined()
   })
 
-  it('reads the central directory of a large file from disk', () => {
+  it('reads the central directory of a large file from disk', { timeout: 60_000 }, () => {
     const file = tmpFile('big.pptx', pptxBytes(70 * 1024 * 1024))
     const source = fileSource(file)
     try {
