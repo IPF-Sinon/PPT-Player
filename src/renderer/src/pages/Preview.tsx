@@ -182,6 +182,8 @@ export default function PreviewPage() {
   const pageCount = store.deck.info?.pageCount ?? 0
   const pageIndex = store.currentPage
   const info = store.deck.info
+  const firstSize = info?.pageSizes?.[0]
+  const slideRatio = firstSize && firstSize.height > 0 ? firstSize.width / firstSize.height : 16 / 9
 
   return (
     <div
@@ -243,7 +245,12 @@ export default function PreviewPage() {
 
         <div className="stage-wrap">
           {store.deck.doc ? (
-            <SlideStage doc={store.deck.doc} pageIndex={pageIndex} onDoubleClick={() => void startShow()} />
+            <SlideStage
+              doc={store.deck.doc}
+              pageIndex={pageIndex}
+              ratio={slideRatio}
+              onDoubleClick={() => void startShow()}
+            />
           ) : (
             <div className="stage" data-testid="stage-empty">
               <div className="stage-empty" data-over={dragOver}>

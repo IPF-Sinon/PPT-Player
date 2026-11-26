@@ -142,12 +142,19 @@
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
   overflow: hidden;
+  /* The card keeps the page ratio and never exceeds the stage; the canvas fills it.
+     Sizing is CSS-only so a measurement can never feed back into layout. */
+  width: 100%;
+  height: auto;
   max-width: 100%;
   max-height: 100%;
 }
 
 .slide-card canvas {
   display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .stage-empty {
