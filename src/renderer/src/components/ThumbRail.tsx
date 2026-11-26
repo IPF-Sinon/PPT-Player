@@ -4,6 +4,7 @@ import { renderPageToCanvas, type RenderQueue } from '../lib/render'
 
 interface ThumbProps {
   doc: PdfDocumentProxyLike
+  deckId: string
   pageNumber: number
   active: boolean
   queue: RenderQueue
@@ -12,7 +13,7 @@ interface ThumbProps {
 
 const THUMB_WIDTH = 200
 
-export function Thumb({ doc, pageNumber, active, queue, onSelect }: ThumbProps) {
+export function Thumb({ doc, deckId, pageNumber, active, queue, onSelect }: ThumbProps) {
   const holderRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const renderedRef = useRef(false)
@@ -64,6 +65,16 @@ export function Thumb({ doc, pageNumber, active, queue, onSelect }: ThumbProps) 
     }
   }, [doc, pageNumber, queue])
 
+  // A new document must repaint from scratch. Without this the component kept its
+  // "already rendered" flag and showed the previous deck's slides.
+  useEffect(() => {
+    renderedRef.current = false
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    ctx?.clearRect(0, 0, canvas.width, canvas.height)
+  }, [deckId, doc])
+
   return (
     <button
       type="button"
@@ -84,13 +95,14 @@ export function Thumb({ doc, pageNumber, active, queue, onSelect }: ThumbProps) 
 
 interface ThumbRailProps {
   doc: PdfDocumentProxyLike | null
+  deckId: string
   pageCount: number
   currentPage: number
   queue: RenderQueue
   onSelect: (pageIndex: number) => void
 }
 
-export function ThumbRail({ doc, pageCount, currentPage, queue, onSelect }: ThumbRailProps) {
+export function ThumbRail({ doc, deckId, pageCount, currentPage, queue, onSelect }: ThumbRailProps) {
   if (!doc) {
     return (
       <aside className="rail" data-testid="thumb-rail">
@@ -102,9 +114,11 @@ export function ThumbRail({ doc, pageCount, currentPage, queue, onSelect }: Thum
   return (
     <aside className="rail" data-testid="thumb-rail">
       {Array.from({ length: pageCount }, (_, i) => (
+        // Key on the deck as well as the page so switching decks remounts cleanly.
         <Thumb
-          key={i}
+          key={`${deckId}-${i}`}
           doc={doc}
+          deckId={deckId}
           pageNumber={i + 1}
           active={i === currentPage}
           queue={queue}

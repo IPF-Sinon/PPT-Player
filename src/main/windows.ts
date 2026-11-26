@@ -1,7 +1,7 @@
-import { BrowserWindow, screen, shell } from 'electron'
+import { BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { log } from './log'
-import { APP_SCHEME, RENDERER_HOST } from './ipc/protocol'
+import { APP_SCHEME } from './ipc/protocol'
 
 const devUrl = process.env.ELECTRON_RENDERER_URL
 
@@ -11,11 +11,11 @@ function preloadPath(): string {
 
 /** Production loads through app:// so the renderer keeps a normal origin. */
 export function rendererIndexUrl(): string {
-  return `${APP_SCHEME}://${RENDERER_HOST}/index.html`
+  return `${APP_SCHEME}://renderer/index.html`
 }
 
-function loadRenderer(win: BrowserWindow, hash: string): void {
-  const url = devUrl ? `${devUrl}#${hash}` : `${rendererIndexUrl()}#${hash}`
+function loadRenderer(win: BrowserWindow): void {
+  const url = devUrl ? devUrl : rendererIndexUrl()
   void win.loadURL(url).catch((err) => log.error('failed to load renderer', err))
 }
 
@@ -49,18 +49,20 @@ const baseWebPreferences = {
   webSecurity: true
 } as const
 
-let previewWindow: BrowserWindow | null = null
-let playbackWindow: BrowserWindow | null = null
+let mainWindow: BrowserWindow | null = null
 
 export function getPreviewWindow(): BrowserWindow | null {
-  return previewWindow && !previewWindow.isDestroyed() ? previewWindow : null
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
 }
 
-export function getPlaybackWindow(): BrowserWindow | null {
-  return playbackWindow && !playbackWindow.isDestroyed() ? playbackWindow : null
-}
-
-export function createPreviewWindow(): BrowserWindow {
+/**
+ * One window for the whole app.
+ *
+ * Preview and playback are two views in the same renderer, so entering a show is
+ * a fullscreen switch rather than launching a second BrowserWindow with its own
+ * process, React parse and PDF fetch.
+ */
+export function createMainWindow(): BrowserWindow {
   const existing = getPreviewWindow()
   if (existing) {
     existing.focus()
@@ -73,7 +75,7 @@ export function createPreviewWindow(): BrowserWindow {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#0f1115',
     title: 'PPT 放映器',
     autoHideMenuBar: true,
     webPreferences: baseWebPreferences
@@ -81,50 +83,33 @@ export function createPreviewWindow(): BrowserWindow {
 
   hardenWebContents(win)
   win.once('ready-to-show', () => win.show())
-  win.on('closed', () => {
-    previewWindow = null
-  })
 
-  loadRenderer(win, 'preview')
-  previewWindow = win
-  return win
-}
-
-export function createPlaybackWindow(displayPoint?: { x: number; y: number }): BrowserWindow {
-  const existing = getPlaybackWindow()
-  if (existing) {
-    existing.focus()
-    return existing
+  // Leaving fullscreen by any route (Escape, F11, OS gesture) must put the UI back
+  // into preview, otherwise the chrome stays hidden over a normal window.
+  const notifyPlayState = (): void => {
+    if (win.isDestroyed()) return
+    win.webContents.send('play:state', { active: win.isFullScreen() })
   }
+  win.on('enter-full-screen', notifyPlayState)
+  win.on('leave-full-screen', notifyPlayState)
 
-  const display = displayPoint ? screen.getDisplayNearestPoint(displayPoint) : screen.getPrimaryDisplay()
-
-  const win = new BrowserWindow({
-    x: display.bounds.x,
-    y: display.bounds.y,
-    width: display.bounds.width,
-    height: display.bounds.height,
-    fullscreen: true,
-    frame: false,
-    show: false,
-    backgroundColor: '#000000',
-    autoHideMenuBar: true,
-    webPreferences: baseWebPreferences
-  })
-
-  hardenWebContents(win)
-  win.setMenuBarVisibility(false)
-  win.once('ready-to-show', () => win.show())
   win.on('closed', () => {
-    playbackWindow = null
+    mainWindow = null
   })
 
-  loadRenderer(win, 'playback')
-  playbackWindow = win
+  loadRenderer(win)
+  mainWindow = win
   return win
 }
 
-export function closePlaybackWindow(): void {
-  const win = getPlaybackWindow()
-  if (win) win.close()
+export function exitFullScreen(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  if (win.isFullScreen()) win.setFullScreen(false)
+  win.setMenuBarVisibility(false)
+  win.webContents.send('play:state', { active: false })
+}
+
+export function isFullScreen(): boolean {
+  const win = getPreviewWindow()
+  return win ? win.isFullScreen() : false
 }

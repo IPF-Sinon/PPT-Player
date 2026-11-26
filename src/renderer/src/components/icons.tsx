@@ -95,6 +95,12 @@ export const Settings = svg(
     <path d="M12 3.5v2M12 18.5v2M4.6 7.8l1.7 1M17.7 15.2l1.7 1M4.6 16.2l1.7-1M17.7 8.8l1.7-1" />
   </>
 )
+export const Undo = svg(
+  <>
+    <path d="M4 9h9.5a4.5 4.5 0 010 9H8" />
+    <path d="M7.5 5.5L4 9l3.5 3.5" />
+  </>
+)
 export const Plus = svg(<path d="M12 5v14M5 12h14" />)
 export const Minus = svg(<path d="M5 12h14" />)
 export const Close = svg(<path d="M6 6l12 12M18 6L6 18" />)

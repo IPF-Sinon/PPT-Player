@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  BootstrapInfo,
   ConvertProgress,
   DeckInfo,
   EngineStatus,
@@ -12,6 +13,7 @@ import type {
 export const IPC = {
   deckProbe: 'deck:probe',
   deckOpen: 'deck:open',
+  deckCancel: 'deck:cancel',
   deckInfo: 'deck:info',
   deckClose: 'deck:close',
   deckReportMetrics: 'deck:report-metrics',
@@ -23,6 +25,8 @@ export const IPC = {
   settingsSet: 'settings:set',
   playEnter: 'play:enter',
   playExit: 'play:exit',
+  playState: 'play:state',
+  appBootstrap: 'app:bootstrap',
   appOpenLog: 'app:open-log',
   appRevealCache: 'app:reveal-cache',
   appPickFile: 'app:pick-file',
@@ -30,17 +34,22 @@ export const IPC = {
   appCacheClear: 'app:cache-clear',
   inkSave: 'ink:save',
   inkLoad: 'ink:load',
-  appPlaybackContext: 'app:playback-context',
-  appOpenExternal: 'app:open-external',
-  appPendingOpen: 'app:pending-open'
+  appOpenExternal: 'app:open-external'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
+
+/** Playback state pushed from main, so leaving fullscreen cannot desync the UI. */
+export interface PlayState {
+  active: boolean
+}
 
 /** The surface exposed to the renderer through contextBridge. */
 export interface RendererApi {
   probe(path: string): Promise<ProbeResult>
   open(path: string): Promise<OpenResult>
+  /** Abort the conversion currently in flight, if any. */
+  cancelOpen(): Promise<void>
   deckInfo(deckId: string): Promise<DeckInfo | null>
   closeDeck(deckId: string): Promise<void>
   reportMetrics(
@@ -54,8 +63,12 @@ export interface RendererApi {
   setLoPath(path: string): Promise<EngineStatus>
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
+  /** Enter fullscreen playback in the current window. */
   enterPlayback(deckId: string, pageIndex: number): Promise<void>
   exitPlayback(): Promise<void>
+  /** Fired when main changes fullscreen state, including OS-driven exits. */
+  onPlayState(cb: (state: PlayState) => void): () => void
+  bootstrap(): Promise<BootstrapInfo>
   openLog(): Promise<void>
   revealCache(): Promise<void>
   pickFile(): Promise<string | null>
@@ -63,11 +76,10 @@ export interface RendererApi {
   clearCache(): Promise<void>
   saveInk(deckId: string, pages: InkPage[]): Promise<void>
   loadInk(deckId: string): Promise<InkPage[]>
-  /** Deck currently being played, resolved by the playback window at startup. */
-  playbackContext(): Promise<{ deckId: string; pageIndex: number } | null>
-  deckUrl(deckId: string): Promise<string | null>
+  /** Absolute path for a dropped File. Electron 32+ removed File.path. */
+  getPathForFile(file: File): string
   /** Fired when a second instance or the shell asks to open a file. */
   onExternalOpen(cb: (path: string) => void): () => void
-  /** File requested at launch, consumed once. */
-  takePendingOpen(): Promise<string | null>
+  /** Deck PDF URL for an already-registered deck. */
+  deckUrl(deckId: string): string
 }

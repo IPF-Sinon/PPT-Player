@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { copyFileSync, createReadStream, mkdirSync, rmSync, statSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { MAX_SOURCE_BYTES, extensionOf } from '../../shared/formats'
 import { AppError, toPayload } from '../../shared/errors'
@@ -8,10 +8,13 @@ import { consoleLogger as log } from './logging'
 import { DeckCache, cacheKey } from './cache'
 import { detectFormat } from './detect'
 import { runLibreOffice } from './engine-lo'
+import { bufferSource, fileSource } from './byte-source'
 import type { EngineStatus } from '../../shared/types'
 
 export interface ConvertContext {
   cacheRoot: string
+  /** Directory holding reusable LibreOffice profiles. */
+  profileRoot: string
   appVersion: string
   /** Resolved conversion engine, injected so the pipeline stays testable. */
   engine: () => EngineStatus | Promise<EngineStatus>
@@ -31,6 +34,9 @@ interface DeckRecord {
 const decks = new Map<string, DeckRecord>()
 let cache: DeckCache | null = null
 
+/** Conversion budget. Long enough for a big deck, short enough to fail visibly. */
+const CONVERT_TIMEOUT_MS = 60_000
+
 export function getCache(ctx: ConvertContext): DeckCache {
   if (!cache) cache = new DeckCache(ctx.cacheRoot)
   return cache
@@ -41,31 +47,20 @@ export function resetPipelineForTests(): void {
   cache = null
 }
 
-function readStream(filePath: string, end?: number): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    const stream = end === undefined ? createReadStream(filePath) : createReadStream(filePath, { start: 0, end })
-    stream.on('data', (chunk) => {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
-    })
-    stream.on('end', () => resolve(Buffer.concat(chunks)))
-    stream.on('error', reject)
-  })
-}
-
-/** Read enough of the file to classify it without loading multi-hundred MB decks. */
-async function readForDetection(filePath: string, size: number): Promise<Buffer> {
-  if (size > 64 * 1024 * 1024) return await readStream(filePath, 8 * 1024 * 1024)
-  return await readStream(filePath)
-}
-
 export interface ProbeResult {
   format: FormatInfo
   bytes: number
   mtimeMs: number
 }
 
-export async function probeFile(filePath: string): Promise<ProbeResult> {
+/**
+ * Classify a file without loading it.
+ *
+ * Only the header, the ZIP tail and the central directory are read, so the cost is
+ * independent of file size and a deck larger than 64 MB is no longer truncated
+ * into a false "corrupt-zip".
+ */
+export function probeFile(filePath: string): ProbeResult {
   let stat
   try {
     stat = statSync(filePath)
@@ -80,8 +75,14 @@ export async function probeFile(filePath: string): Promise<ProbeResult> {
   if (stat.size === 0) throw new AppError('EEMPTY', '文件是空的')
   if (stat.size > MAX_SOURCE_BYTES) throw new AppError('ETOOBIG', '文件超过 200 MB，无法打开')
 
-  const buf = await readForDetection(filePath, stat.size)
-  const format = detectFormat(buf, extensionOf(filePath))
+  const source = fileSource(filePath)
+  let format: FormatInfo
+  try {
+    format = detectFormat(source, extensionOf(filePath))
+  } finally {
+    source.close()
+  }
+
   if (format.kind === 'unsupported') {
     const message = format.reason === 'not-presentation' ? '这不是演示文稿文件' : '无法识别的文件格式'
     throw new AppError('EUNSUPPORTED', message, format.reason)
@@ -107,7 +108,7 @@ export async function openDeck(
 
   try {
     emit('', 'probe', 0.05, '正在识别格式')
-    const probe = await probeFile(filePath)
+    const probe = probeFile(filePath)
 
     if (probe.format.kind === 'encrypted-ooxml') {
       throw new AppError('EENCRYPTED', '加密的演示文稿需要本机安装 PowerPoint 才能打开')
@@ -167,7 +168,8 @@ export async function openDeck(
       const result = await runLibreOffice({
         sourcePath: filePath,
         outDir: cacheDir,
-        timeoutMs: 180_000,
+        profileRoot: ctx.profileRoot,
+        timeoutMs: CONVERT_TIMEOUT_MS,
         sofficePath: engine.path,
         signal: options.signal
       })
@@ -177,10 +179,12 @@ export async function openDeck(
         ms: result.durationMs,
         exitCode: result.exitCode,
         timedOut: result.timedOut,
+        aborted: result.aborted,
         stderr: result.stderr.slice(0, 400)
       })
       if (!result.ok) {
         rmSync(cacheDir, { recursive: true, force: true })
+        if (result.aborted) throw new AppError('ECANCELLED', '已取消转换')
         if (result.timedOut) throw new AppError('ETIMEOUT', '转换超时，请重试', result.stderr.slice(0, 2000))
         throw new AppError('ECONVERT', '转换失败', result.stderr.slice(0, 2000))
       }
@@ -190,13 +194,19 @@ export async function openDeck(
 
     emit(deckId, 'parse', 0.85, '正在解析页面')
 
+    // Count the pages here rather than waiting for the renderer. The cache is only
+    // reusable once it knows the page count, and an open that was closed before the
+    // renderer finished reporting used to leave pageCount 0 and throw the entry
+    // away, forcing a full reconversion next time.
+    const pageCount = countPdfPages(pdfPath)
+
     const info: DeckInfo = {
       deckId,
       sourcePath: filePath,
       sourceBytes: probe.bytes,
       sourceMtimeMs: probe.mtimeMs,
       format: probe.format,
-      pageCount: 0,
+      pageCount,
       pageSizes: [],
       engine: isPdf ? 'none' : 'libreoffice',
       enginePath,
@@ -215,7 +225,7 @@ export async function openDeck(
       appVersion: ctx.appVersion,
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
-      pageCount: 0
+      pageCount
     })
     emit(deckId, 'done', 1, '完成')
     ctx.onOpened?.(filePath)
@@ -225,6 +235,34 @@ export async function openDeck(
     log.error('openDeck failed', err)
     return { ok: false, error: toPayload(err) }
   }
+}
+
+/**
+ * Count pages in a PDF without a full parser.
+ *
+ * Walks the file for `/Type /Page` objects, which LibreOffice always writes as
+ * plain objects. When that finds nothing it falls back to the /Count entry of the
+ * page tree root, and finally to 0 so the renderer can report the real number.
+ */
+export function countPdfPages(pdfPath: string): number {
+  let text = ''
+  try {
+    text = readFileSync(pdfPath, 'latin1')
+  } catch {
+    return 0
+  }
+
+  let pages = 0
+  const pageRe = /\/Type\s*\/Page(?![s\w])/g
+  while (pageRe.exec(text) !== null) pages++
+  if (pages > 0) return pages
+
+  const countMatch = /\/Type\s*\/Pages[\s\S]{0,200}?\/Count\s+(\d+)/.exec(text)
+  if (countMatch) {
+    const parsed = Number(countMatch[1])
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return 0
 }
 
 export function getDeck(deckId: string): DeckRecord | undefined {
@@ -273,3 +311,5 @@ export function ensureCacheDir(ctx: ConvertContext): string {
   mkdirSync(ctx.cacheRoot, { recursive: true })
   return ctx.cacheRoot
 }
+
+export { bufferSource }

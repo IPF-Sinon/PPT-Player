@@ -21,24 +21,24 @@ describe('AppError', () => {
 
 describe('ipc schemas', () => {
   it('rejects an invalid deck id', () => {
-    expect(() => playEnterSchema.parse({ deckId: 'zzz', pageIndex: 0 })).toThrow()
+    expect(() => playEnterSchema({ deckId: 'zzz', pageIndex: 0 })).toThrow()
   })
 
   it('accepts a valid play request', () => {
-    const parsed = playEnterSchema.parse({ deckId: 'abcdef012345', pageIndex: 3 })
+    const parsed = playEnterSchema({ deckId: 'abcdef012345', pageIndex: 3 })
     expect(parsed.pageIndex).toBe(3)
   })
 
   it('rejects unknown settings keys', () => {
-    expect(() => settingsPatchSchema.parse({ nope: 1 })).toThrow()
+    expect(() => settingsPatchSchema({ nope: 1 })).toThrow()
   })
 
   it('accepts a valid settings patch', () => {
-    expect(settingsPatchSchema.parse({ cacheBudgetMb: 512 }).cacheBudgetMb).toBe(512)
+    expect(settingsPatchSchema({ cacheBudgetMb: 512 }).cacheBudgetMb).toBe(512)
   })
 
   it('validates ink pages', () => {
-    const parsed = inkPagesSchema.parse({
+    const parsed = inkPagesSchema({
       deckId: 'abcdef012345',
       pages: [{ pageIndex: 0, strokes: [{ tool: 'pen', color: '#f00', width: 3, points: [0, 0, 1, 1] }] }]
     })
@@ -47,7 +47,7 @@ describe('ipc schemas', () => {
 
   it('rejects an unknown ink tool', () => {
     expect(() =>
-      inkPagesSchema.parse({
+      inkPagesSchema({
         deckId: 'abcdef012345',
         pages: [{ pageIndex: 0, strokes: [{ tool: 'spray', color: '#f00', width: 3, points: [] }] }]
       })
@@ -62,14 +62,21 @@ describe('parseSettings', () => {
   })
 
   it('keeps valid values', () => {
-    const parsed = parseSettings({ ...DEFAULT_SETTINGS, cacheBudgetMb: 512, loopPlayback: true })
+    const parsed = parseSettings({ ...DEFAULT_SETTINGS, cacheBudgetMb: 512, loPathOverride: 'D:/lo' })
     expect(parsed.cacheBudgetMb).toBe(512)
-    expect(parsed.loopPlayback).toBe(true)
+    expect(parsed.loPathOverride).toBe('D:/lo')
   })
 
   it('fills in missing keys', () => {
-    const parsed = parseSettings({ loopPlayback: true })
+    const parsed = parseSettings({ loPathOverride: 'D:/lo' })
     expect(parsed.cacheBudgetMb).toBe(DEFAULT_SETTINGS.cacheBudgetMb)
     expect(parsed.recentFiles).toEqual([])
+  })
+
+  // A settings file from a newer build must not brick an older one.
+  it('ignores unknown keys instead of failing', () => {
+    const parsed = parseSettings({ cacheBudgetMb: 512, somethingNew: true })
+    expect(parsed.cacheBudgetMb).toBe(512)
+    expect(parsed).not.toHaveProperty('somethingNew')
   })
 })

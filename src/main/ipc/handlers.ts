@@ -5,6 +5,7 @@ import { IPC } from '../../shared/ipc-contract'
 import { AppError, toPayload } from '../../shared/errors'
 import type {
   AppSettings,
+  BootstrapInfo,
   DeckInfo,
   EngineStatus,
   InkPage,
@@ -33,24 +34,28 @@ import {
   setLoPathSchema,
   settingsPatchSchema
 } from './schema'
-import { closePlaybackWindow, createPlaybackWindow, getPreviewWindow } from '../windows'
+import { exitFullScreen, getPreviewWindow, isFullScreen } from '../windows'
 
 export interface HandlerDeps {
   ctx: ConvertContext
   inkDir: string
 }
 
-let playbackContext: { deckId: string; pageIndex: number } | null = null
 let pendingOpenPath: string | null = null
-
-export function getPlaybackContext(): { deckId: string; pageIndex: number } | null {
-  return playbackContext
-}
 
 /** Remember a file requested by the shell or a second instance. */
 export function setPendingOpenPath(path: string | null): void {
   pendingOpenPath = path
 }
+
+/**
+ * Cancels the conversion currently in flight.
+ *
+ * Opening a second deck, or asking to cancel, used to leave the first soffice
+ * process running for up to three minutes with no way to stop it. Each open now
+ * owns a controller that the next open aborts.
+ */
+let activeConversion: AbortController | null = null
 
 function wrap<T>(fn: () => Promise<T> | T): Promise<T> {
   return Promise.resolve()
@@ -65,10 +70,10 @@ export function registerHandlers(deps: HandlerDeps): void {
   const { ctx } = deps
 
   ipcMain.handle(IPC.deckProbe, (_e, rawPath: unknown) =>
-    wrap(async (): Promise<ProbeResult> => {
-      const filePath = pathSchema.parse(rawPath)
+    wrap((): ProbeResult => {
+      const filePath = pathSchema(rawPath)
       try {
-        const probe = await probeFile(filePath)
+        const probe = probeFile(filePath)
         return { ok: true, format: probe.format, bytes: probe.bytes, mtimeMs: probe.mtimeMs }
       } catch (err) {
         if (err instanceof AppError) return { ok: false, error: err.toPayload() }
@@ -79,37 +84,56 @@ export function registerHandlers(deps: HandlerDeps): void {
 
   ipcMain.handle(IPC.deckOpen, (event, rawPath: unknown) =>
     wrap(async (): Promise<OpenResult> => {
-      const filePath = pathSchema.parse(rawPath)
+      const filePath = pathSchema(rawPath)
       const sender = event.sender
-      const result = await openDeck(ctx, filePath, {
-        onProgress: (progress) => {
-          if (!sender.isDestroyed()) sender.send(IPC.deckProgress, progress)
+
+      // A new open supersedes whatever was converting.
+      activeConversion?.abort()
+      const controller = new AbortController()
+      activeConversion = controller
+
+      try {
+        const result = await openDeck(ctx, filePath, {
+          signal: controller.signal,
+          onProgress: (progress) => {
+            if (!sender.isDestroyed()) sender.send(IPC.deckProgress, progress)
+          }
+        })
+        if (result.ok) {
+          getCache(ctx).prune(loadSettings().cacheBudgetMb * 1024 * 1024)
         }
-      })
-      if (result.ok) {
-        getCache(ctx).prune(loadSettings().cacheBudgetMb * 1024 * 1024)
+        return result
+      } finally {
+        if (activeConversion === controller) activeConversion = null
       }
-      return result
+    })
+  )
+
+  ipcMain.handle(IPC.deckCancel, () =>
+    wrap((): void => {
+      activeConversion?.abort()
+      activeConversion = null
+      log.info('conversion cancelled by user')
     })
   )
 
   ipcMain.handle(IPC.deckInfo, (_e, rawDeckId: unknown) =>
     wrap((): DeckInfo | null => {
-      const deckId = deckIdSchema.parse(rawDeckId)
+      const deckId = deckIdSchema(rawDeckId)
       return getDeck(deckId)?.info ?? null
     })
   )
 
   ipcMain.handle(IPC.deckReportMetrics, (_e, raw: unknown) =>
     wrap((): DeckInfo | null => {
-      const parsed = reportMetricsSchema.parse(raw)
+      const parsed = reportMetricsSchema(raw)
       return reportDeckMetrics(ctx, parsed.deckId, parsed.pageCount, parsed.pageSizes)
     })
   )
 
   ipcMain.handle(IPC.deckClose, (_e, rawDeckId: unknown) =>
     wrap((): void => {
-      closeDeck(deckIdSchema.parse(rawDeckId))
+      closeDeck(deckIdSchema(rawDeckId))
     })
   )
 
@@ -123,7 +147,7 @@ export function registerHandlers(deps: HandlerDeps): void {
 
   ipcMain.handle(IPC.engineSetLoPath, (_e, raw: unknown) =>
     wrap((): Promise<EngineStatus> => {
-      const { path } = setLoPathSchema.parse(raw)
+      const { path } = setLoPathSchema(raw)
       saveSettings({ loPathOverride: path })
       resetEngineCache()
       return engineStatus(true)
@@ -133,38 +157,49 @@ export function registerHandlers(deps: HandlerDeps): void {
   ipcMain.handle(IPC.settingsGet, () => wrap((): AppSettings => loadSettings()))
   ipcMain.handle(IPC.settingsSet, (_e, raw: unknown) =>
     wrap((): AppSettings => {
-      const patch = settingsPatchSchema.parse(raw)
+      const patch = settingsPatchSchema(raw)
       return saveSettings(patch)
     })
   )
 
+  /**
+   * Playback happens in the existing window.
+   *
+   * Spinning up a second BrowserWindow meant a fresh renderer process that had to
+   * re-parse React and pdf.js and re-fetch the PDF before the first slide could
+   * appear. The window now just goes fullscreen and the renderer switches view
+   * using the document it already has.
+   */
   ipcMain.handle(IPC.playEnter, (event, raw: unknown) =>
     wrap((): void => {
-      const parsed = playEnterSchema.parse(raw)
-      playbackContext = { deckId: parsed.deckId, pageIndex: parsed.pageIndex }
-      const bounds = BrowserWindow.fromWebContents(event.sender)?.getBounds()
-      const point = bounds ? { x: bounds.x + 20, y: bounds.y + 20 } : undefined
-      createPlaybackWindow(point)
+      playEnterSchema(raw)
+      const win = BrowserWindow.fromWebContents(event.sender) ?? getPreviewWindow()
+      if (!win || win.isDestroyed()) return
+      win.setFullScreen(true)
+      win.setMenuBarVisibility(false)
+      win.webContents.send(IPC.playState, { active: true })
     })
   )
 
-  ipcMain.handle(IPC.playExit, () =>
+  ipcMain.handle(IPC.playExit, (event) =>
     wrap((): void => {
-      playbackContext = null
-      closePlaybackWindow()
-      const preview = getPreviewWindow()
-      if (preview && !preview.isDestroyed()) preview.focus()
+      const win = BrowserWindow.fromWebContents(event.sender) ?? getPreviewWindow()
+      if (win && !win.isDestroyed()) exitFullScreen(win)
     })
   )
 
-  ipcMain.handle(IPC.appOpenLog, () => wrap(async (): Promise<void> => {
-    await shell.openPath(logPath())
-  }))
+  ipcMain.handle(IPC.appOpenLog, () =>
+    wrap(async (): Promise<void> => {
+      await shell.openPath(logPath())
+    })
+  )
 
-  ipcMain.handle(IPC.appRevealCache, () => wrap(async (): Promise<void> => {
-    const dir = ensureCacheDir(ctx)
-    await shell.openPath(dir)
-  }))
+  ipcMain.handle(IPC.appRevealCache, () =>
+    wrap(async (): Promise<void> => {
+      const dir = ensureCacheDir(ctx)
+      await shell.openPath(dir)
+    })
+  )
 
   ipcMain.handle(IPC.appCacheClear, () =>
     wrap((): void => {
@@ -210,21 +245,30 @@ export function registerHandlers(deps: HandlerDeps): void {
     })
   )
 
-  ipcMain.handle(IPC.appPlaybackContext, () =>
-    wrap((): { deckId: string; pageIndex: number } | null => playbackContext)
-  )
-
-  ipcMain.handle(IPC.appPendingOpen, () =>
-    wrap((): string | null => {
-      const path = pendingOpenPath
+  /**
+   * One round trip for everything the first screen needs.
+   *
+   * Startup used to fire several independent IPC calls (settings, pending file,
+   * recent list, engine status) and the UI waited on the slowest. Bundling them
+   * removes the round trips; engine status is deliberately not included because it
+   * is only needed once a non-PDF file is opened.
+   */
+  ipcMain.handle(IPC.appBootstrap, () =>
+    wrap((): BootstrapInfo => {
+      const settings = loadSettings()
+      const pending = pendingOpenPath
       pendingOpenPath = null
-      return path
+      return {
+        settings,
+        pendingOpenPath: pending,
+        fullscreen: isFullScreen()
+      }
     })
   )
 
   ipcMain.handle(IPC.inkSave, (_e, raw: unknown) =>
     wrap((): void => {
-      const parsed = inkPagesSchema.parse(raw)
+      const parsed = inkPagesSchema(raw)
       const dir = deps.inkDir
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, parsed.deckId + '.json'), JSON.stringify(parsed.pages), 'utf8')
@@ -233,7 +277,7 @@ export function registerHandlers(deps: HandlerDeps): void {
 
   ipcMain.handle(IPC.inkLoad, (_e, rawDeckId: unknown) =>
     wrap((): InkPage[] => {
-      const deckId = deckIdSchema.parse(rawDeckId)
+      const deckId = deckIdSchema(rawDeckId)
       try {
         const text = readFileSync(join(deps.inkDir, deckId + '.json'), 'utf8')
         return JSON.parse(text) as InkPage[]

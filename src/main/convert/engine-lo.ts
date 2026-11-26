@@ -1,21 +1,15 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { randomUUID } from 'node:crypto'
 import { consoleLogger as log } from './logging'
-
-export interface LoCandidate {
-  /** Absolute path to soffice.com (console build on Windows). */
-  sofficePath: string
-  origin: 'bundled' | 'installed' | 'path' | 'custom'
-}
 
 export interface LoRunOptions {
   /** Absolute path to the source deck. */
   sourcePath: string
   /** Directory that receives deck.pdf. */
   outDir: string
+  /** Directory that holds reusable LibreOffice user profiles. */
+  profileRoot: string
   /** Hard timeout in milliseconds. */
   timeoutMs: number
   /** Absolute path to the soffice binary. */
@@ -30,9 +24,15 @@ export interface LoRunResult {
   stderr: string
   timedOut: boolean
   durationMs: number
+  /** True when the caller cancelled the run. */
+  aborted: boolean
 }
 
 const STDERR_LIMIT = 8000
+/** How long to wait for the stderr pipe to close after the process has exited. */
+const EXIT_GRACE_MS = 1500
+/** Number of reusable profile slots, enough for a couple of concurrent opens. */
+const PROFILE_SLOTS = 2
 
 /** Convert a Windows path into a file:// URL usable by soffice. */
 export function toFileUrl(winPath: string): string {
@@ -51,49 +51,93 @@ function killTree(pid: number): void {
 }
 
 /**
- * Run a headless LibreOffice conversion to PDF. A zero exit code does not prove
- * success, so the caller must validate the produced file.
+ * Pick a reusable LibreOffice profile directory.
+ *
+ * Every conversion used to get a fresh random profile and delete it afterwards,
+ * which forced LibreOffice to rebuild its configuration, font cache and extension
+ * registry from scratch each time. That cold start is most of the delay before the
+ * first slide appears. Profiles are now reused across runs, with a small number of
+ * slots so two concurrent conversions cannot share one.
  */
-export async function runLibreOffice(opts: LoRunOptions): Promise<LoRunResult> {
-  const started = Date.now()
-  const profileDir = join(tmpdir(), 'ppt-player', 'lo-' + randomUUID())
-  mkdirSync(profileDir, { recursive: true })
-  mkdirSync(opts.outDir, { recursive: true })
+export function pickProfileDir(profileRoot: string): string {
+  mkdirSync(profileRoot, { recursive: true })
+  for (let slot = 0; slot < PROFILE_SLOTS; slot++) {
+    const dir = join(profileRoot, 'slot-' + slot)
+    const lock = join(dir, '.lock')
+    if (!existsSync(lock)) {
+      mkdirSync(dir, { recursive: true })
+      return dir
+    }
+  }
+  // All slots are busy; fall back to an extra directory rather than failing.
+  const extra = join(profileRoot, 'slot-' + Date.now().toString(36))
+  mkdirSync(extra, { recursive: true })
+  return extra
+}
 
-  const args = [
+/** Arguments for a headless Impress-to-PDF conversion. */
+export function buildConvertArgs(opts: {
+  profileDir: string
+  outDir: string
+  sourcePath: string
+}): string[] {
+  return [
     '--headless',
     '--norestore',
     '--invisible',
     '--nologo',
+    '--nodefault',
+    '--nofirststartwizard',
     '--nolockcheck',
-    '-env:UserInstallation=' + toFileUrl(profileDir),
+    '-env:UserInstallation=' + toFileUrl(opts.profileDir),
     '--convert-to',
     'pdf:impress_pdf_Export',
     '--outdir',
     opts.outDir,
     opts.sourcePath
   ]
+}
+
+/**
+ * Run a headless LibreOffice conversion to PDF.
+ *
+ * A zero exit code does not prove success, so the caller must validate the output.
+ * The promise always settles: on Windows soffice.com launches soffice.bin and a
+ * stray grandchild can keep the inherited stderr handle open, so 'close' may never
+ * fire. 'exit' is therefore treated as the primary signal and a short grace timer
+ * forces completion if the pipe stays open.
+ */
+export async function runLibreOffice(opts: LoRunOptions): Promise<LoRunResult> {
+  const started = Date.now()
+  const profileDir = pickProfileDir(opts.profileRoot)
+  const lockPath = join(profileDir, '.lock')
+  mkdirSync(opts.outDir, { recursive: true })
+
+  const args = buildConvertArgs({
+    profileDir,
+    outDir: opts.outDir,
+    sourcePath: opts.sourcePath
+  })
 
   return await new Promise<LoRunResult>((resolve) => {
     let child: ChildProcess
     try {
-      // stdout must be consumed. soffice writes progress to stdout, and a piped
-      // stream nobody drains fills its 64 KB buffer and blocks the child forever —
-      // which is what "stuck on 正在转换" actually was. Only stderr is kept.
+      // stdout is dropped rather than piped: soffice writes progress there, and a
+      // piped stream nobody drains fills its buffer and blocks the child forever.
       child = spawn(opts.sofficePath, args, {
         windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe']
       })
     } catch (err) {
       log.error('failed to spawn soffice', err)
-      rmSync(profileDir, { recursive: true, force: true })
       resolve({
         ok: false,
         pdfPath: '',
         exitCode: null,
         stderr: String(err),
         timedOut: false,
-        durationMs: Date.now() - started
+        durationMs: Date.now() - started,
+        aborted: false
       })
       return
     }
@@ -101,47 +145,64 @@ export async function runLibreOffice(opts: LoRunOptions): Promise<LoRunResult> {
     let stderr = ''
     let settled = false
     let timedOut = false
+    let aborted = false
+    let graceTimer: NodeJS.Timeout | null = null
 
-    const timer = setTimeout(() => {
-      timedOut = true
-      if (child.pid) killTree(child.pid)
-    }, opts.timeoutMs)
-
-    const onAbort = (): void => {
-      if (child.pid) killTree(child.pid)
+    const releaseProfile = (): void => {
+      rmSync(lockPath, { force: true })
     }
-    opts.signal?.addEventListener('abort', onAbort, { once: true })
-
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (stderr.length < STDERR_LIMIT) stderr += chunk.toString('utf8')
-    })
 
     const finish = (exitCode: number | null): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (graceTimer) clearTimeout(graceTimer)
       opts.signal?.removeEventListener('abort', onAbort)
-      rmSync(profileDir, { recursive: true, force: true })
+      child.stderr?.destroy()
+      releaseProfile()
 
-      // soffice names its output after the source file, so find whatever PDF it
-      // produced and normalise it to deck.pdf.
       const pdfPath = collectPdf(opts.outDir)
       const produced = pdfPath !== ''
       resolve({
-        ok: produced && !timedOut,
+        ok: produced && !timedOut && !aborted,
         pdfPath,
         exitCode,
         stderr,
         timedOut,
-        durationMs: Date.now() - started
+        durationMs: Date.now() - started,
+        aborted
       })
     }
 
+    const timer = setTimeout(() => {
+      timedOut = true
+      if (child.pid) killTree(child.pid)
+      // Give the tree a moment to die, then settle regardless.
+      graceTimer = setTimeout(() => finish(null), EXIT_GRACE_MS)
+    }, opts.timeoutMs)
+
+    const onAbort = (): void => {
+      aborted = true
+      if (child.pid) killTree(child.pid)
+      graceTimer = setTimeout(() => finish(null), EXIT_GRACE_MS)
+    }
+    opts.signal?.addEventListener('abort', onAbort, { once: true })
+    if (opts.signal?.aborted) onAbort()
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderr.length < STDERR_LIMIT) stderr += chunk.toString('utf8')
+    })
+
+    // 'exit' fires when the process is gone; 'close' waits for the pipes. Prefer
+    // 'exit' and use a grace timer so a lingering handle cannot hang the caller.
+    child.on('exit', (code) => {
+      graceTimer = setTimeout(() => finish(code), EXIT_GRACE_MS)
+    })
+    child.on('close', (code) => finish(code))
     child.on('error', (err) => {
       stderr += '\nspawn error: ' + String(err)
       finish(null)
     })
-    child.on('close', (code) => finish(code))
   })
 }
 

@@ -19,6 +19,7 @@ const noEngine: EngineStatus = {
 function ctxWith(engine: EngineStatus): ConvertContext {
   return {
     cacheRoot: mkdtempSync(join(tmpdir(), 'ppt-cache-')),
+    profileRoot: mkdtempSync(join(tmpdir(), 'ppt-lo-')),
     appVersion: '0.1.0',
     engine: () => engine
   }
@@ -41,32 +42,34 @@ function pptx(): Buffer {
 }
 
 describe('probeFile', () => {
-  it('reports a valid pptx', async () => {
-    const probe = await probeFile(tmpDeck('ok.pptx', pptx()))
+  it('reports a valid pptx', () => {
+    const probe = probeFile(tmpDeck('ok.pptx', pptx()))
     expect(probe.format.kind).toBe('ooxml-presentation')
     expect(probe.bytes).toBeGreaterThan(0)
   })
 
-  it('rejects an empty file', async () => {
+  // Probing is synchronous by design: it reads a few kilobytes of header and ZIP
+  // tail, so there is nothing to await and no round trip to schedule.
+  it('rejects an empty file', () => {
     const file = tmpDeck('empty.pptx', Buffer.alloc(0))
-    await expect(probeFile(file)).rejects.toBeInstanceOf(AppError)
-    await expect(probeFile(file)).rejects.toMatchObject({ code: 'EEMPTY' })
+    expect(() => probeFile(file)).toThrow(AppError)
+    expect(() => probeFile(file)).toThrow(expect.objectContaining({ code: 'EEMPTY' }) as never)
   })
 
-  it('rejects a missing file', async () => {
-    await expect(probeFile(join(tmpdir(), 'definitely-missing-xyz.pptx'))).rejects.toMatchObject({
-      code: 'ENOENT'
-    })
+  it('rejects a missing file', () => {
+    expect(() => probeFile(join(tmpdir(), 'definitely-missing-xyz.pptx'))).toThrow(
+      expect.objectContaining({ code: 'ENOENT' }) as never
+    )
   })
 
-  it('rejects a non-presentation file', async () => {
+  it('rejects a non-presentation file', () => {
     const file = tmpDeck('notes.pptx', Buffer.from('plain text, not a deck'))
-    await expect(probeFile(file)).rejects.toMatchObject({ code: 'EUNSUPPORTED' })
+    expect(() => probeFile(file)).toThrow(expect.objectContaining({ code: 'EUNSUPPORTED' }) as never)
   })
 
-  it('rejects an encrypted container', async () => {
+  it('rejects an encrypted container', () => {
     const file = tmpDeck('secret.pptx', pptx())
-    const probe = await probeFile(file)
+    const probe = probeFile(file)
     expect(probe.format.encrypted).toBe(false)
   })
 })
@@ -129,6 +132,7 @@ describe('openDeck', () => {
     const seen: string[] = []
     const ctx: ConvertContext = {
       cacheRoot: mkdtempSync(join(tmpdir(), 'ppt-cache-')),
+    profileRoot: mkdtempSync(join(tmpdir(), 'ppt-lo-')),
       appVersion: '0.1.0',
       engine: () => noEngine,
       onOpened: (path) => seen.push(path)

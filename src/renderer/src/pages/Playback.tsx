@@ -3,61 +3,44 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { InkPage, InkStroke } from '@shared/types'
 import { zh } from '@shared/strings.zh'
 import { useAppStore } from '../store'
-import { loadPdf, readPageSizes } from '../lib/pdf'
 import { RenderQueue, renderPageToCanvas } from '../lib/render'
-import { SideNav } from '../components/SideNav'
 import { PlayToolbar, type PlayTool } from '../components/PlayToolbar'
 import { InkLayer } from '../components/InkLayer'
 import { Whiteboard } from '../components/Whiteboard'
-import { OverviewGrid } from '../components/OverviewGrid'
 import '../styles/playback.css'
 
 const IDLE_MS = 2500
-const LENS_SIZE = 240
-const LENS_ZOOM = 2.4
 
 export default function PlaybackPage() {
   const store = useAppStore()
   const [pageIndex, setPageIndex] = useState(0)
   const [chromeVisible, setChromeVisible] = useState(true)
   const [tool, setTool] = useState<PlayTool>('pointer')
-  const [blackout, setBlackout] = useState(false)
-  const [whiteout, setWhiteout] = useState(false)
-  /** The annotation board: a full-screen surface with its own strokes. */
   const [boardOpen, setBoardOpen] = useState(false)
   const [boardStrokes, setBoardStrokes] = useState<InkStroke[]>([])
-  const [overviewOpen, setOverviewOpen] = useState(false)
-  const [helpOpen, setHelpOpen] = useState(false)
   const [toast, setToast] = useState('')
   const [ink, setInk] = useState<InkPage[]>([])
-  const [dark, setDark] = useState(false)
   const [pendingDigits, setPendingDigits] = useState('')
-  const [loop, setLoop] = useState(false)
   const [ratio, setRatio] = useState(16 / 9)
-  const [firstFramePainted, setFirstFramePainted] = useState(false)
-  const [lens, setLens] = useState<{ x: number; y: number } | null>(null)
+  const [painted, setPainted] = useState(false)
+  const [box, setBox] = useState({ width: 0, height: 0 })
+  const [penColor, setPenColor] = useState('#ef4444')
+  const [penWidth, setPenWidth] = useState(5)
 
-  /** Latest values the keyboard handler needs, so the listener never re-binds. */
-  const keyStateRef = useRef({
-    pageIndex: 0,
-    pageCount: 0,
-    blackout: false,
-    whiteout: false,
-    boardOpen: false,
-    overviewOpen: false,
-    helpOpen: false,
-    pendingDigits: '',
-    loop: false
-  })
   const frameRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const idleTimer = useRef<number | null>(null)
+  const toastTimer = useRef<number | null>(null)
   const queue = useMemo(() => new RenderQueue(), [])
   const pageCount = store.deck.info?.pageCount ?? 0
+  const doc = store.deck.doc
 
   const showToast = useCallback((message: string): void => {
+    // Clear the previous timer: without this a fast sequence of messages left
+    // earlier timers running and cleared the toast too early.
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
     setToast(message)
-    window.setTimeout(() => setToast(''), 1600)
+    toastTimer.current = window.setTimeout(() => setToast(''), 1600)
   }, [])
 
   const pokeChrome = useCallback((): void => {
@@ -70,203 +53,56 @@ export default function PlaybackPage() {
     (next: number): void => {
       if (pageCount === 0) return
       if (next < 0) {
-        if (loop) {
-          setPageIndex(pageCount - 1)
-          return
-        }
         showToast(zh.playback.startOfDeck)
         return
       }
       if (next > pageCount - 1) {
-        if (loop) {
-          setPageIndex(0)
-          return
-        }
         showToast(zh.playback.endOfDeck)
         return
       }
       setPageIndex(next)
-      setLens(null)
       pokeChrome()
     },
-    [loop, pageCount, pokeChrome, showToast]
+    [pageCount, pokeChrome, showToast]
   )
 
   const next = useCallback(() => goTo(pageIndex + 1), [goTo, pageIndex])
   const prev = useCallback(() => goTo(pageIndex - 1), [goTo, pageIndex])
 
-  const endShow = useCallback(async (): Promise<void> => {
-    await window.api.exitPlayback()
+  const exitShow = useCallback((): void => {
+    void window.api.exitPlayback()
   }, [])
 
-  const dismissBlank = useCallback((): void => {
-    setBlackout(false)
-    setWhiteout(false)
-  }, [])
-
-  // Boot exactly once. This effect seeds the shared store and the local page
-  // index, so it must never re-run. Depending on the whole store here made it
-  // restart on every store write and snap the deck back to its opening slide.
-  // Store actions are read through getState() so the deps can stay empty.
+  // Ink and settings are already in the shared store, so entering playback needs no
+  // IPC round trip and no PDF reload: the document is the one the preview mounted.
   useEffect(() => {
-    let cancelled = false
-    const boot = async (): Promise<void> => {
-      const ctx = await window.api.playbackContext()
-      if (!ctx || cancelled) return
-      const info = await window.api.deckInfo(ctx.deckId)
-      if (!info) {
-        await window.api.exitPlayback()
-        return
-      }
-      const url = (await window.api.deckUrl(ctx.deckId)) ?? ''
-      const doc = await loadPdf(url)
-      const sizes = await readPageSizes(doc)
-      if (cancelled) return
-      const api = useAppStore.getState()
-      api.setDeck({ info: { ...info, pageCount: doc.numPages, pageSizes: sizes }, doc, url })
-      api.setPage(ctx.pageIndex)
-      setPageIndex(Math.min(ctx.pageIndex, Math.max(0, doc.numPages - 1)))
-      const saved = await window.api.loadInk(ctx.deckId)
-      if (!cancelled) setInk(saved)
-      const settings = await window.api.getSettings()
-      if (!cancelled) setLoop(settings.loopPlayback)
-      document.title = zh.windowTitle(info.sourcePath.split(/[\\/]/).pop() ?? '')
-    }
-    void boot()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    setPageIndex(Math.min(store.currentPage, Math.max(0, (store.deck.info?.pageCount ?? 1) - 1)))
+    setInk(store.ink)
+    const size = store.deck.info?.pageSizes?.[0]
+    if (size && size.height > 0) setRatio(size.width / size.height)
+  }, [store.currentPage, store.deck.info, store.ink])
 
   useEffect(() => {
     pokeChrome()
     return () => {
       if (idleTimer.current) window.clearTimeout(idleTimer.current)
+      if (toastTimer.current) window.clearTimeout(toastTimer.current)
     }
   }, [pokeChrome])
 
-  keyStateRef.current = {
-    pageIndex,
-    pageCount,
-    blackout,
-    whiteout,
-    boardOpen,
-    overviewOpen,
-    helpOpen,
-    pendingDigits,
-    loop
-  }
+  const stateRef = useRef({ pageIndex, pageCount, boardOpen, pendingDigits })
+  stateRef.current = { pageIndex, pageCount, boardOpen, pendingDigits }
 
-  // Keep the slide box ratio in sync with the current page.
-  useEffect(() => {
-    const sizes = store.deck.info?.pageSizes
-    const size = sizes?.[pageIndex]
-    if (size && size.height > 0) setRatio(size.width / size.height)
-  }, [pageIndex, store.deck.info?.pageSizes])
-
-  // Render the slide into the box CSS already sized for it, and re-render on resize.
-  useEffect(() => {
-    const doc = store.deck.doc
-    if (!doc) return
-    let cancelled = false
-    let raf = 0
-    let lastKey = ''
-
-    const draw = async (): Promise<void> => {
-      const box = frameRef.current
-      if (!box) return
-      const rect = box.getBoundingClientRect()
-      if (rect.width < 32 || rect.height < 32) return
-
-      const dpr = Math.min(2, window.devicePixelRatio || 1)
-      const key = Math.round(rect.width) + 'x' + Math.round(rect.height) + ':' + pageIndex + ':' + dpr
-      if (key === lastKey) return
-      lastKey = key
-
-      const bitmap = await renderPageToCanvas({
-        doc,
-        pageNumber: pageIndex + 1,
-        boxWidth: rect.width,
-        boxHeight: rect.height,
-        dpr
-      })
-      if (cancelled) return
-      const canvas = canvasRef.current
-      if (!canvas) return
-      canvas.width = bitmap.width
-      canvas.height = bitmap.height
-      canvas.style.width = '100%'
-      canvas.style.height = '100%'
-      const ctx = canvas.getContext('2d')
-      ctx?.drawImage(bitmap.canvas, 0, 0)
-      setFirstFramePainted(true)
-
-      // Sample a corner so the chrome can invert over light decks.
-      try {
-        const sample = ctx?.getImageData(0, 0, Math.min(24, canvas.width), Math.min(24, canvas.height))
-        if (sample) {
-          const data = sample.data
-          let sum = 0
-          for (let i = 0; i < data.length; i += 4) {
-            sum += (data[i] ?? 0) * 0.299 + (data[i + 1] ?? 0) * 0.587 + (data[i + 2] ?? 0) * 0.114
-          }
-          setDark(sum / (data.length / 4) > 150)
-        }
-      } catch {
-        setDark(false)
-      }
-    }
-
-    const schedule = (): void => {
-      if (raf) window.cancelAnimationFrame(raf)
-      raf = window.requestAnimationFrame(() => {
-        void draw()
-      })
-    }
-
-    schedule()
-
-    const observer = new ResizeObserver(schedule)
-    if (frameRef.current) observer.observe(frameRef.current)
-    window.addEventListener('resize', schedule)
-
-    return () => {
-      cancelled = true
-      if (raf) window.cancelAnimationFrame(raf)
-      observer.disconnect()
-      window.removeEventListener('resize', schedule)
-    }
-  }, [store.deck.doc, pageIndex])
-
-  // One listener for the whole session: the handler reads state from a ref, so a
-  // re-render can never leave a window where keys are ignored.
+  // Keyboard: one stable listener reading the latest state, so it never rebinds
+  // mid-show and never drops a key.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      const state = keyStateRef.current
-      pokeChrome()
-
+      const state = stateRef.current
       const key = event.key
-
-      if (state.blackout || state.whiteout) {
-        if (key === 'Escape') {
-          void window.api.exitPlayback()
-          return
-        }
-        setBlackout(false)
-        setWhiteout(false)
-        if (key !== 'b' && key !== 'B' && key !== '.' && key !== 'w' && key !== 'W') return
-      }
 
       if (/^[0-9]$/.test(key)) {
         setPendingDigits((d) => (d + key).slice(0, 4))
         return
-      }
-
-      const jump = (target: number): void => {
-        if (target >= 0 && target < state.pageCount) {
-          setPageIndex(target)
-          setLens(null)
-        }
       }
 
       switch (key) {
@@ -274,7 +110,7 @@ export default function PlaybackPage() {
           if (state.pendingDigits) {
             const target = Number(state.pendingDigits)
             setPendingDigits('')
-            if (target >= 1 && target <= state.pageCount) jump(target - 1)
+            if (target >= 1 && target <= state.pageCount) setPageIndex(target - 1)
           }
           event.preventDefault()
           return
@@ -286,9 +122,7 @@ export default function PlaybackPage() {
         case 'n':
         case 'N':
           event.preventDefault()
-          if (state.pageIndex < state.pageCount - 1) jump(state.pageIndex + 1)
-          else if (state.loop) jump(0)
-          else showToast(zh.playback.endOfDeck)
+          goTo(state.pageIndex + 1)
           return
         case 'ArrowLeft':
         case 'ArrowUp':
@@ -296,65 +130,39 @@ export default function PlaybackPage() {
         case 'p':
         case 'P':
           event.preventDefault()
-          if (state.pageIndex > 0) jump(state.pageIndex - 1)
-          else if (state.loop) jump(state.pageCount - 1)
-          else showToast(zh.playback.startOfDeck)
+          goTo(state.pageIndex - 1)
           return
         case 'Home':
           event.preventDefault()
-          jump(0)
+          setPageIndex(0)
           return
         case 'End':
           event.preventDefault()
-          jump(state.pageCount - 1)
+          setPageIndex(Math.max(0, state.pageCount - 1))
           return
         case 'Escape':
           if (state.boardOpen) {
             setBoardOpen(false)
             return
           }
-          if (state.overviewOpen) {
-            setOverviewOpen(false)
-            return
-          }
-          if (state.helpOpen) {
-            setHelpOpen(false)
-            return
-          }
-          void window.api.exitPlayback()
+          exitShow()
+          return
+        case 'd':
+        case 'D':
+          setBoardOpen((v) => !v)
           return
         case 'b':
         case 'B':
         case '.':
-          setWhiteout(false)
-          setBlackout((v) => !v)
-          return
-        case 'w':
-        case 'W':
-          setBlackout(false)
-          setWhiteout((v) => !v)
-          return
-        case 'd':
-        case 'D':
-          // Whiteboard: a blank canvas for freehand notes, independent of slides.
-          setBlackout(false)
-          setWhiteout(false)
-          setBoardOpen((v) => !v)
-          return
-        case 'o':
-        case 'O':
-          setOverviewOpen((v) => !v)
-          return
-        case 'l':
-        case 'L':
-          setTool('magnifier')
+          setTool((t) => (t === 'pointer' ? 'pen' : 'pointer'))
           return
         case 'e':
         case 'E':
-          setTool('eraser')
+          setTool((t) => (t === 'eraser' ? 'pointer' : 'eraser'))
           return
-        case '?':
-          setHelpOpen((v) => !v)
+        case 'u':
+        case 'U':
+          undoStroke()
           return
         default:
           setPendingDigits('')
@@ -363,7 +171,75 @@ export default function PlaybackPage() {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [pokeChrome, showToast])
+  }, [goTo, exitShow])
+
+  // Leave playback when the window stops being fullscreen, whatever caused it.
+  useEffect(() => {
+    return window.api.onPlayState((state) => {
+      if (!state.active) exitShow()
+    })
+  }, [exitShow])
+
+  // Keep the slide box measured so the ink layer and canvas agree on coordinates.
+  useEffect(() => {
+    const frame = frameRef.current
+    if (!frame) return
+    const measure = (): void => {
+      setBox({ width: frame.clientWidth, height: frame.clientHeight })
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(frame)
+    return () => observer.disconnect()
+  }, [])
+
+  // Render the current slide into the box CSS has already sized.
+  useEffect(() => {
+    const frame = frameRef.current
+    if (!doc || !frame) return
+    const rect = frame.getBoundingClientRect()
+    if (rect.width < 32 || rect.height < 32) return
+
+    let cancelled = false
+    const controller = new AbortController()
+
+    void (async () => {
+      try {
+        const bitmap = await queue.run(() =>
+          renderPageToCanvas({
+            doc,
+            pageNumber: pageIndex + 1,
+            boxWidth: rect.width,
+            boxHeight: rect.height,
+            dpr: Math.min(2, window.devicePixelRatio || 1),
+            signal: controller.signal
+          })
+        )
+        if (cancelled) return
+        const canvas = canvasRef.current
+        if (!canvas) return
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
+        const ctx = canvas.getContext('2d')
+        ctx?.drawImage(bitmap.canvas, 0, 0)
+        setPainted(true)
+      } catch {
+        // Cancelled by a page change.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [doc, pageIndex, box.width, box.height, queue])
+
+  const currentStrokes = ink.find((p) => p.pageIndex === pageIndex)?.strokes ?? []
+
+  const persistInk = useCallback((pages: InkPage[]): void => {
+    const deckId = useAppStore.getState().deck.info?.deckId
+    if (deckId) void window.api.saveInk(deckId, pages)
+  }, [])
 
   const commitStroke = useCallback(
     (stroke: InkStroke): void => {
@@ -372,21 +248,34 @@ export default function PlaybackPage() {
         const nextPages = exists
           ? prev.map((p) => (p.pageIndex === pageIndex ? { ...p, strokes: [...p.strokes, stroke] } : p))
           : [...prev, { pageIndex, strokes: [stroke] }]
-        const deckId = store.deck.info?.deckId
-        if (deckId) void window.api.saveInk(deckId, nextPages)
+        persistInk(nextPages)
         return nextPages
       })
     },
-    [pageIndex, store.deck.info?.deckId]
+    [pageIndex, persistInk]
   )
 
-  const currentStrokes = ink.find((p) => p.pageIndex === pageIndex)?.strokes ?? []
+  const undoStroke = useCallback((): void => {
+    setInk((prev) => {
+      const target = prev.find((p) => p.pageIndex === pageIndex)
+      if (!target || target.strokes.length === 0) return prev
+      const nextPages = prev.map((p) =>
+        p.pageIndex === pageIndex ? { ...p, strokes: p.strokes.slice(0, -1) } : p
+      )
+      persistInk(nextPages)
+      return nextPages
+    })
+  }, [pageIndex, persistInk])
+
+  const clearInk = useCallback((): void => {
+    setInk((prev) => {
+      const nextPages = prev.map((p) => (p.pageIndex === pageIndex ? { ...p, strokes: [] } : p))
+      persistInk(nextPages)
+      return nextPages
+    })
+  }, [pageIndex, persistInk])
 
   const onStageClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
-    if (blackout || whiteout) {
-      dismissBlank()
-      return
-    }
     if (tool !== 'pointer') return
     const rect = event.currentTarget.getBoundingClientRect()
     const position = (event.clientX - rect.left) / rect.width
@@ -395,75 +284,31 @@ export default function PlaybackPage() {
     else pokeChrome()
   }
 
-  const onStageMove = (event: ReactMouseEvent<HTMLDivElement>): void => {
-    if (tool !== 'magnifier') {
-      if (lens) setLens(null)
-      return
-    }
-    const rect = event.currentTarget.getBoundingClientRect()
-    setLens({ x: event.clientX - rect.left, y: event.clientY - rect.top })
-  }
-
-  const lensLeft = lens ? Math.min(Math.max(0, lens.x - LENS_SIZE / 2), Math.max(0, LENS_SIZE)) : 0
-  const lensTop = lens ? Math.min(Math.max(0, lens.y - LENS_SIZE / 2), Math.max(0, LENS_SIZE)) : 0
-
   return (
     <div
       className="playback"
       data-testid="playback-page"
-      data-blackout={blackout}
-      data-whiteout={whiteout}
       data-board={boardOpen}
       onMouseMove={pokeChrome}
-      onClick={() => {
-        // Blanked surfaces hide the chrome, so the root takes the restoring click.
-        // The board is a drawing surface, so it never dismisses on click.
-        if (boardOpen) return
-        if (blackout || whiteout) dismissBlank()
-      }}
     >
-      <div
-        className="slide-wrap"
-        ref={frameRef}
-        onClick={onStageClick}
-        onMouseMove={onStageMove}
-        onMouseLeave={() => setLens(null)}
-        role="presentation"
-      >
-        <div className="slide-frame" data-painted={firstFramePainted} style={{ aspectRatio: String(ratio) }}>
+      <div className="slide-wrap" onClick={onStageClick} role="presentation">
+        <div
+          className="slide-frame"
+          ref={frameRef}
+          data-painted={painted}
+          style={{ ['--slide-ratio' as string]: String(ratio) }}
+        >
           <canvas ref={canvasRef} data-testid="playback-canvas" />
           <InkLayer
-            width={frameRef.current?.clientWidth ?? 1280}
-            height={frameRef.current?.clientHeight ?? 720}
+            boxWidth={box.width}
+            boxHeight={box.height}
             strokes={currentStrokes}
-            active={tool === 'pen' || tool === 'eraser'}
+            drawing={tool === 'pen' || tool === 'eraser'}
             tool={tool === 'eraser' ? 'eraser' : 'pen'}
-            color="#e11d48"
-            widthPx={4}
+            color={penColor}
+            widthPx={penWidth}
             onCommit={commitStroke}
           />
-          {lens ? (
-            <div className="magnifier" data-testid="magnifier-lens" style={{ left: lensLeft, top: lensTop }}>
-              <canvas
-                ref={(node) => {
-                  const source = canvasRef.current
-                  if (!node || !source) return
-                  node.width = source.width
-                  node.height = source.height
-                  const ctx = node.getContext('2d')
-                  if (!ctx) return
-                  ctx.clearRect(0, 0, node.width, node.height)
-                  ctx.drawImage(source, 0, 0)
-                }}
-                style={{
-                  width: (frameRef.current?.clientWidth ?? 0) * LENS_ZOOM + 'px',
-                  height: (frameRef.current?.clientHeight ?? 0) * LENS_ZOOM + 'px',
-                  left: -(lens.x * LENS_ZOOM - LENS_SIZE / 2) + 'px',
-                  top: -(lens.y * LENS_ZOOM - LENS_SIZE / 2) + 'px'
-                }}
-              />
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -471,80 +316,51 @@ export default function PlaybackPage() {
         <Whiteboard
           strokes={boardStrokes}
           tool={tool === 'eraser' ? 'eraser' : 'pen'}
+          color={penColor}
+          widthPx={penWidth}
           onCommit={(stroke) => setBoardStrokes((prev) => [...prev, stroke])}
         />
       ) : null}
 
-      <SideNav
-        side="left"
-        pageIndex={pageIndex}
-        pageCount={pageCount}
-        onPrev={prev}
-        onNext={next}
-        visible={chromeVisible && !overviewOpen}
-        dark={dark}
-      />
-      <SideNav
-        side="right"
-        pageIndex={pageIndex}
-        pageCount={pageCount}
-        onPrev={prev}
-        onNext={next}
-        visible={chromeVisible && !overviewOpen}
-        dark={dark}
-      />
+      <div className="page-indicator" data-visible={chromeVisible} data-testid="page-indicator">
+        {pageIndex + 1} / {pageCount}
+      </div>
 
       <PlayToolbar
         tool={tool}
-        blackout={blackout}
         boardOpen={boardOpen}
-        overviewOpen={overviewOpen}
+        canUndo={currentStrokes.length > 0}
+        penColor={penColor}
+        penWidth={penWidth}
+        visible={chromeVisible}
         onTool={(t) => {
           setTool(t)
-          if (t !== 'magnifier') setLens(null)
           pokeChrome()
         }}
-        onToggleBlackout={() => {
-          setWhiteout(false)
-          setBlackout((v) => !v)
-        }}
+        onPrev={prev}
+        onNext={next}
         onToggleBoard={() => {
-          setBlackout(false)
-          setWhiteout(false)
           setBoardOpen((v) => !v)
+          pokeChrome()
         }}
-        onToggleOverview={() => setOverviewOpen((v) => !v)}
-        onEnd={() => void endShow()}
-        visible={chromeVisible && !overviewOpen}
-        dark={dark}
+        onColor={(color) => {
+          setPenColor(color)
+          setTool('pen')
+        }}
+        onWidth={(width) => {
+          setPenWidth(width)
+          setTool('pen')
+        }}
+        onUndo={boardOpen ? () => setBoardStrokes((prev) => prev.slice(0, -1)) : undoStroke}
+        onClear={boardOpen ? () => setBoardStrokes([]) : clearInk}
+        onEnd={exitShow}
       />
 
-      {overviewOpen && store.deck.doc ? (
-        <OverviewGrid
-          doc={store.deck.doc}
-          pageCount={pageCount}
-          currentPage={pageIndex}
-          queue={queue}
-          onSelect={(page) => setPageIndex(page)}
-          onClose={() => setOverviewOpen(false)}
-        />
-      ) : null}
-
-      {helpOpen ? (
-        <div className="help-panel" data-testid="help-panel">
-          <h2>{zh.playback.helpTitle}</h2>
-          <dl>
-            {zh.playback.helpRows.map(([keys, desc]) => (
-              <div key={keys} style={{ display: 'contents' }}>
-                <dt>{keys}</dt>
-                <dd>{desc}</dd>
-              </div>
-            ))}
-          </dl>
+      {toast ? (
+        <div className="play-toast" data-testid="play-toast">
+          {toast}
         </div>
       ) : null}
-
-      {toast ? <div className="toast">{toast}</div> : null}
     </div>
   )
 }

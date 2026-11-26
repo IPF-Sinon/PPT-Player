@@ -6,8 +6,11 @@
 # bisect across CI runs.
 param(
   [Parameter(Mandatory = $true)][string]$InstallRoot,
+  # Module and PDF-import removal is not a stage: those files are probed one at a
+  # time in build-engine.ps1, because whether a library is load-bearing can only be
+  # answered by attempting a real conversion.
   [Parameter(Mandatory = $true)][ValidateSet(
-    'docs', 'junk', 'modules', 'ui', 'authoring', 'pdfimport', 'locales', 'fonts', 'runtime', 'report'
+    'docs', 'junk', 'ui', 'authoring', 'locales', 'fonts', 'runtime', 'report'
   )][string]$Stage
 )
 

@@ -1,21 +1,23 @@
-import { useEffect, useState } from 'react'
+import { lazy, useEffect, useState } from 'react'
 import PreviewPage from './pages/Preview'
-import PlaybackPage from './pages/Playback'
 
-type Route = 'preview' | 'playback'
-
-function routeFromHash(): Route {
-  return window.location.hash.replace('#', '') === 'playback' ? 'playback' : 'preview'
-}
+type Mode = 'preview' | 'playback'
 
 export default function App() {
-  const [route, setRoute] = useState<Route>(routeFromHash)
+  const [mode, setMode] = useState<Mode>('preview')
 
   useEffect(() => {
-    const onHashChange = (): void => setRoute(routeFromHash())
-    window.addEventListener('hashchange', onHashChange)
-    return () => window.removeEventListener('hashchange', onHashChange)
+    const off = window.api.onPlayState((state) => {
+      setMode(state.active ? 'playback' : 'preview')
+    })
+    return off
   }, [])
 
-  return route === 'playback' ? <PlaybackPage /> : <PreviewPage />
+  if (mode === 'preview') return <PreviewPage />
+  // Playback is loaded on demand: it is only reachable once a deck is open, so its
+  // bundle must not weigh on the first paint.
+  const Playback = PlaybackLazy
+  return <Playback />
 }
+
+const PlaybackLazy = lazy(() => import('./pages/Playback'))

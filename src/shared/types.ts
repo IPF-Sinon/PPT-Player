@@ -68,16 +68,21 @@ export type EngineStatus = {
 }
 
 export interface AppSettings {
-  /** Prefer PowerPoint COM over the bundled engine when COM is available. */
-  preferCom: boolean
   /** Explicit soffice path override, empty means auto. */
   loPathOverride: string
   /** Slide cache budget in megabytes. */
   cacheBudgetMb: number
-  /** Loop from the last slide back to the first. */
-  loopPlayback: boolean
   /** Recent files, newest first. */
   recentFiles: string[]
+}
+
+/** Everything the first screen needs, returned in one IPC round trip. */
+export interface BootstrapInfo {
+  settings: AppSettings
+  /** File requested at launch, consumed once. */
+  pendingOpenPath: string | null
+  /** True when the window is already fullscreen. */
+  fullscreen: boolean
 }
 
 export interface InkStroke {

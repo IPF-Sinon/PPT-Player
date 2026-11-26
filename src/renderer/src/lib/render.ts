@@ -7,6 +7,8 @@ export interface RenderRequest {
   boxWidth: number
   boxHeight: number
   dpr: number
+  /** Abort a render that is no longer wanted, e.g. while the window is resizing. */
+  signal?: AbortSignal
 }
 
 export interface RenderedBitmap {
@@ -31,7 +33,13 @@ export async function renderPageToCanvas(req: RenderRequest): Promise<RenderedBi
   context.fillRect(0, 0, canvas.width, canvas.height)
 
   const task = page.render({ canvasContext: context, viewport, canvas })
-  await task.promise
+  const onAbort = (): void => task.cancel()
+  req.signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    await task.promise
+  } finally {
+    req.signal?.removeEventListener('abort', onAbort)
+  }
   return { canvas, width: canvas.width, height: canvas.height }
 }
 

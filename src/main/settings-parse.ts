@@ -1,30 +1,46 @@
-import { z } from 'zod'
 import { consoleLogger as log } from './convert/logging'
+import type { AppSettings } from '../shared/types'
 
-export const settingsSchema = z.object({
-  preferCom: z.boolean().default(false),
-  loPathOverride: z.string().default(''),
-  cacheBudgetMb: z.number().int().min(128).max(8192).default(2048),
-  loopPlayback: z.boolean().default(false),
-  recentFiles: z.array(z.string()).max(20).default([])
-})
-
-export type Settings = z.infer<typeof settingsSchema>
+export type Settings = AppSettings
 
 export const DEFAULT_SETTINGS: Settings = {
-  preferCom: false,
   loPathOverride: '',
   cacheBudgetMb: 2048,
-  loopPlayback: false,
   recentFiles: []
 }
 
-/** Coerce arbitrary parsed JSON into valid settings, dropping unknown keys. */
+function asString(value: unknown, fallback: string, max = 32767): string {
+  return typeof value === 'string' && value.length <= max ? value : fallback
+}
+
+function asInt(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
+    ? value
+    : fallback
+}
+
+/**
+ * Coerce arbitrary parsed JSON into valid settings.
+ *
+ * Unknown keys are dropped rather than rejected: a settings file written by a newer
+ * build must not brick an older one, it just loses the fields it does not know.
+ */
 export function parseSettings(raw: unknown): Settings {
-  const result = settingsSchema.safeParse(raw)
-  if (result.success) return result.data
-  log.warn('settings invalid, falling back to defaults')
-  return { ...DEFAULT_SETTINGS }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    log.warn('settings invalid, falling back to defaults')
+    return { ...DEFAULT_SETTINGS }
+  }
+  const value = raw as Record<string, unknown>
+  const recentRaw = value.recentFiles
+  const recentFiles = Array.isArray(recentRaw)
+    ? recentRaw.filter((p): p is string => typeof p === 'string' && p.length <= 32767).slice(0, 20)
+    : []
+
+  return {
+    loPathOverride: asString(value.loPathOverride, DEFAULT_SETTINGS.loPathOverride),
+    cacheBudgetMb: asInt(value.cacheBudgetMb, DEFAULT_SETTINGS.cacheBudgetMb, 128, 8192),
+    recentFiles
+  }
 }
 
 /** Insert a path at the head of the recent list, de-duplicated and capped. */

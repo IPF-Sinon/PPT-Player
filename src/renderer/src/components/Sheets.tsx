@@ -106,20 +106,6 @@ export function SettingsSheet({ open, onClose, onSaved }: SettingsSheetProps) {
 
           <div className="sheet-row">
             <div>
-              <label htmlFor="loop-playback">循环放映</label>
-              <p className="sheet-hint">最后一页之后回到第一页</p>
-            </div>
-            <input
-              id="loop-playback"
-              type="checkbox"
-              checked={settings?.loopPlayback ?? false}
-              disabled={busy || !settings}
-              onChange={(e) => void patch({ loopPlayback: e.target.checked })}
-            />
-          </div>
-
-          <div className="sheet-row">
-            <div>
               <label>诊断</label>
               <p className="sheet-hint">日志与缓存目录</p>
             </div>
@@ -132,43 +118,6 @@ export function SettingsSheet({ open, onClose, onSaved }: SettingsSheetProps) {
               </button>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-interface HelpSheetProps {
-  open: boolean
-  onClose: () => void
-}
-
-export function HelpSheet({ open, onClose }: HelpSheetProps) {
-  if (!open) return null
-  return (
-    <div className="sheet-backdrop" onClick={onClose} role="presentation">
-      <div
-        className="sheet"
-        data-testid="help-sheet"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label={zh.playback.helpTitle}
-      >
-        <header className="sheet-head">
-          <h2>{zh.playback.helpTitle}</h2>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label={zh.common.close}>
-            <Close size={16} />
-          </button>
-        </header>
-        <div className="sheet-body">
-          <dl className="sheet-keys">
-            {zh.playback.helpRows.map(([keys, desc]) => (
-              <div key={keys} style={{ display: 'contents' }}>
-                <dt>{keys}</dt>
-                <dd>{desc}</dd>
-              </div>
-            ))}
-          </dl>
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
-import { KIND_LABEL, MAX_SOURCE_BYTES, extensionOf } from '../../shared/formats'
+import { KIND_LABEL, MAX_SOURCE_BYTES } from '../../shared/formats'
 import type { FormatInfo } from '../../shared/types'
+import { bufferSource, type ByteSource } from './byte-source'
 import { hasStream, listCfbEntries, looksLikeCfb } from './cfb-reader'
 import { listZipEntries, looksLikeZip, readZipEntry } from './zip-reader'
 
@@ -20,25 +21,30 @@ function reject(declaredExt: string, reason: string): FormatInfo {
   }
 }
 
-function isOdp(buf: Buffer, names: string[]): boolean {
+function isOdp(source: ByteSource, names: string[]): boolean {
   const mimeName = names.find((n) => n.toLowerCase() === 'mimetype')
   if (!mimeName) return false
-  const payload = readZipEntry(buf, mimeName)
+  const payload = readZipEntry(source, mimeName)
   if (!payload) return false
   return payload.toString('utf8').trim() === ODP_MIME
 }
 
 /**
- * Classify a presentation file from its bytes. The declared extension is used
- * only for labelling and mismatch reporting, never for the decision itself.
+ * Classify a presentation from its bytes. The declared extension is used only for
+ * labelling and mismatch reporting, never for the decision itself.
  */
-export function detectFormat(buf: Buffer, declaredExt: string): FormatInfo {
+export function detectFormat(
+  input: ByteSource | Buffer,
+  declaredExt: string
+): FormatInfo {
+  const source: ByteSource = Buffer.isBuffer(input) ? bufferSource(input) : input
   const ext = declaredExt.toLowerCase()
 
-  if (buf.length === 0) return reject(ext, 'empty')
-  if (buf.length > MAX_SOURCE_BYTES) return reject(ext, 'too-large')
+  if (source.size === 0) return reject(ext, 'empty')
+  if (source.size > MAX_SOURCE_BYTES) return reject(ext, 'too-large')
 
-  if (buf.length >= 5 && buf.subarray(0, 5).toString('latin1') === '%PDF-') {
+  const magic = source.read(0, 8)
+  if (magic.length >= 5 && magic.subarray(0, 5).toString('latin1') === '%PDF-') {
     return {
       kind: 'pdf',
       container: 'pdf',
@@ -49,12 +55,12 @@ export function detectFormat(buf: Buffer, declaredExt: string): FormatInfo {
     }
   }
 
-  if (looksLikeZip(buf)) {
-    const names = listZipEntries(buf).map((e) => e.name)
+  if (looksLikeZip(source)) {
+    const names = listZipEntries(source).map((e) => e.name)
     if (names.length === 0) return reject(ext, 'corrupt-zip')
     const lower = names.map((n) => n.toLowerCase())
 
-    if (isOdp(buf, names)) {
+    if (isOdp(source, names)) {
       return {
         kind: 'odp',
         container: 'zip',
@@ -90,8 +96,8 @@ export function detectFormat(buf: Buffer, declaredExt: string): FormatInfo {
     return reject(ext, 'not-presentation')
   }
 
-  if (looksLikeCfb(buf)) {
-    const entries = listCfbEntries(buf)
+  if (looksLikeCfb(source)) {
+    const entries = listCfbEntries(source)
     if (entries.length === 0) return reject(ext, 'corrupt-cfb')
 
     if (hasStream(entries, 'EncryptedPackage') && hasStream(entries, 'EncryptionInfo')) {
@@ -125,5 +131,3 @@ export function detectFormat(buf: Buffer, declaredExt: string): FormatInfo {
 
   return reject(ext, 'unknown-signature')
 }
-
-export { extensionOf }

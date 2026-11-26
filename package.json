@@ -23,12 +23,7 @@
     "package": "npm run build && electron-builder --win nsis zip --x64 --publish never",
     "fixtures": "node scripts/make-fixtures.mjs"
   },
-  "dependencies": {
-    "cfb": "1.2.2",
-    "electron-log": "5.4.4",
-    "fflate": "0.8.3",
-    "zod": "4.6.7"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "@playwright/test": "1.65.1",
@@ -37,10 +32,12 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
     "@vitest/coverage-v8": "5.1.1",
+    "cfb": "1.2.2",
     "electron": "45.3.4",
     "electron-builder": "26.18.0",
     "electron-vite": "6.0.0",
     "eslint": "9.39.5",
+    "fflate": "0.8.3",
     "pdfjs-dist": "6.5.438",
     "png-to-ico": "3.0.2",
     "pptxgenjs": "4.0.1",

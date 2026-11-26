@@ -11,44 +11,33 @@ const deckPath = join(root, 'tests', 'fixtures', 'deck-16x9.pptx')
 const deckName = 'deck-16x9.pptx'
 
 let app: ElectronApplication
-let preview: Page
-let playback: Page | null = null
-
-/** Locate the playback window among all open windows. */
-async function findPlayback(): Promise<Page | null> {
-  for (const page of app.windows()) {
-    if (page.isClosed()) continue
-    const isPlayback = await page
-      .evaluate("!!document.querySelector('[data-testid=\"playback-page\"]')")
-      .catch(() => false)
-    if (isPlayback) return page
-  }
-  return null
-}
+let win: Page
 
 /**
- * Click a chrome control and retry until the page label changes.
- *
- * The chrome fades out after 2.5s of idle and stops receiving pointer events, so
- * a click can silently land on the slide instead. Move the mouse to wake it, wait
- * for the control to be fully opaque, then click.
+ * Wake the chrome and click a control until the page indicator reaches the
+ * expected value. The chrome fades after 2.5s of idle and stops taking pointer
+ * events, so a click can otherwise land on the slide.
  */
 async function clickUntilPage(page: Page, testId: string, expected: string): Promise<void> {
   await expect
     .poll(
       async () => {
-        await page.mouse.move(500, 400).catch(() => undefined)
+        await page.mouse.move(400, 400).catch(() => undefined)
         const control = page.getByTestId(testId)
-        await expect(control).toHaveCSS('opacity', '1', { timeout: 3000 }).catch(() => undefined)
         await control.click({ timeout: 3000 }).catch(() => undefined)
-        return await page
-          .getByTestId('side-page-left')
-          .textContent()
-          .catch(() => '')
+        return await page.getByTestId('page-indicator').textContent().catch(() => '')
       },
-      { timeout: 90_000, intervals: [500, 1000, 2000] }
+      { timeout: 60_000, intervals: [300, 800, 1500] }
     )
-    .toBe(expected)
+    .toContain(expected)
+}
+
+/** True when the window reports itself as fullscreen. */
+async function isFullScreen(): Promise<boolean> {
+  return await app.evaluate(({ BrowserWindow }) => {
+    const all = BrowserWindow.getAllWindows()
+    return all.length > 0 && all[0].isFullScreen()
+  })
 }
 
 test.describe.configure({ mode: 'serial' })
@@ -61,197 +50,236 @@ test.beforeAll(async () => {
     env: { ...process.env, NODE_ENV: 'test' }
   })
 
-  // Surface main-process output so failures are diagnosable from the CI log.
   const mainProc = app.process()
   mainProc.stdout?.on('data', (chunk: Buffer) => console.log('[main:out]', chunk.toString().trim()))
   mainProc.stderr?.on('data', (chunk: Buffer) => console.log('[main:err]', chunk.toString().trim()))
 
-  preview = await app.firstWindow()
-  preview.on('console', (msg) => console.log('[renderer]', msg.type(), msg.text()))
-  preview.on('pageerror', (err) => console.log('[renderer:error]', err.message))
-  await preview.waitForLoadState('domcontentloaded')
+  win = await app.firstWindow()
+  win.on('console', (msg) => console.log('[renderer]', msg.type(), msg.text()))
+  win.on('pageerror', (err) => console.log('[renderer:error]', err.message))
+  await win.waitForLoadState('domcontentloaded')
 })
 
 test.afterAll(async () => {
   await app?.close()
 })
 
-test('1. preview page opens the deck passed on the command line', async () => {
-  await expect(preview.getByTestId('preview-page')).toBeVisible()
+test('1. preview opens the deck passed on the command line', async () => {
+  await expect(win.getByTestId('preview-page')).toBeVisible()
 
-
-
-  // Wait for the deck name, and report the error card text if it never appears.
   await expect
-    .poll(
-      async () =>
-        preview.evaluate(
-          "document.querySelector('[data-testid=\"deck-name\"]').textContent"
-        ),
-      { timeout: 180_000 }
-    )
+    .poll(async () => win.evaluate("document.querySelector('[data-testid=\"deck-name\"]').textContent"), {
+      timeout: 180_000
+    })
     .toBe(deckName)
 
-  // If the deck never mounts, capture what the UI is actually showing.
-  const errorText = await preview
+  const errorText = await win
     .evaluate("(document.querySelector('[data-testid=\"error-overlay\"]')||{}).textContent || ''")
     .catch(() => '')
   if (errorText) console.log('[e2e] error card:', errorText)
 
-  await expect(preview.getByTestId('deck-format')).toHaveText('PPTX')
-  await preview.screenshot({ path: join(shots, 'preview.png') })
+  await expect(win.getByTestId('deck-format')).toHaveText('PPTX')
+  await win.screenshot({ path: join(shots, 'preview.png') })
 })
 
 test('2. thumbnail rail lists every slide', async () => {
-  await expect(preview.getByTestId('thumb-rail')).toBeVisible()
-  await expect(preview.getByTestId('thumb-1')).toBeVisible()
-  await expect(preview.getByTestId('thumb-2')).toBeVisible()
-  await expect(preview.getByTestId('thumb-3')).toBeVisible()
+  await expect(win.getByTestId('thumb-rail')).toBeVisible()
+  await expect(win.getByTestId('thumb-1')).toBeVisible()
+  await expect(win.getByTestId('thumb-2')).toBeVisible()
+  await expect(win.getByTestId('thumb-3')).toBeVisible()
 })
 
 test('3. clicking a thumbnail moves the stage to that slide', async () => {
-  await expect(preview.getByTestId('preview-pager')).toHaveText('1 / 3')
-  await preview.getByTestId('thumb-2').click()
-  await expect(preview.getByTestId('preview-pager')).toHaveText('2 / 3')
+  await expect(win.getByTestId('preview-pager')).toHaveText('1 / 3')
+  await win.getByTestId('thumb-2').click()
+  await expect(win.getByTestId('preview-pager')).toHaveText('2 / 3')
 })
 
-test('4. starting the show opens a fullscreen playback window', async () => {
-  await preview.getByTestId('start-here').click()
-  await expect.poll(async () => (await findPlayback()) !== null, { timeout: 90_000 }).toBe(true)
-  playback = await findPlayback()
-  expect(playback).not.toBeNull()
-  await expect(playback!.getByTestId('playback-page')).toBeVisible()
-  await expect(playback!.getByTestId('playback-canvas')).toBeVisible()
-  await playback!.screenshot({ path: join(shots, 'playback.png') })
+test('4. playback uses the same window and goes fullscreen', async () => {
+  const windowsBefore = app.windows().length
+  await win.getByTestId('start-here').click()
+
+  await expect.poll(async () => isFullScreen(), { timeout: 30_000 }).toBe(true)
+  // No second BrowserWindow: entering a show must not spawn a new renderer.
+  expect(app.windows().length).toBe(windowsBefore)
+
+  await expect(win.getByTestId('playback-page')).toBeVisible()
+  await expect(win.getByTestId('playback-canvas')).toBeVisible()
+  await win.screenshot({ path: join(shots, 'playback.png') })
 })
 
 test('5. playback starts on the slide the preview was showing', async () => {
-  expect(playback).not.toBeNull()
-  await expect(playback!.getByTestId('side-page-left')).toHaveText('2/3')
-  await expect(playback!.getByTestId('side-page-right')).toHaveText('2/3')
+  await expect(win.getByTestId('page-indicator')).toContainText('2 / 3')
 })
 
 test('6. keyboard navigation advances and rewinds', async () => {
-  expect(playback).not.toBeNull()
-  await playback!.mouse.move(640, 360)
-
-  // Retry the keypress: under CPU load a single dispatched key can be lost.
+  await win.mouse.move(400, 300)
   await expect
     .poll(
       async () => {
-        await playback!.keyboard.press('ArrowRight').catch(() => undefined)
-        return await playback!
-          .getByTestId('side-page-left')
-          .textContent()
-          .catch(() => '')
+        await win.keyboard.press('ArrowRight').catch(() => undefined)
+        return await win.getByTestId('page-indicator').textContent().catch(() => '')
       },
-      { timeout: 45_000, intervals: [250, 500, 1000] }
+      { timeout: 30_000, intervals: [250, 500, 1000] }
     )
-    .toBe('3/3')
+    .toContain('3 / 3')
 
   await expect
     .poll(
       async () => {
-        await playback!.keyboard.press('ArrowLeft').catch(() => undefined)
-        return await playback!
-          .getByTestId('side-page-left')
-          .textContent()
-          .catch(() => '')
+        await win.keyboard.press('ArrowLeft').catch(() => undefined)
+        return await win.getByTestId('page-indicator').textContent().catch(() => '')
       },
-      { timeout: 45_000, intervals: [250, 500, 1000] }
+      { timeout: 30_000, intervals: [250, 500, 1000] }
     )
-    .toBe('2/3')
+    .toContain('2 / 3')
 })
 
-test('7. both side nav stacks are clickable', async () => {
-  expect(playback).not.toBeNull()
-  await clickUntilPage(playback!, 'side-next-right', '3/3')
-  await expect(playback!.getByTestId('side-page-right')).toHaveText('3/3')
-  await clickUntilPage(playback!, 'side-prev-left', '2/3')
-  await expect(playback!.getByTestId('side-page-right')).toHaveText('2/3')
+test('7. the toolbar drives paging', async () => {
+  await clickUntilPage(win, 'tool-next', '3 / 3')
+  await clickUntilPage(win, 'tool-prev', '2 / 3')
 })
 
-test('8. blackout hides the slide and any click restores it', async () => {
-  expect(playback).not.toBeNull()
-  await expect
-    .poll(
-      async () => {
-        await playback!.mouse.move(640, 360)
-        await playback!.getByTestId('tool-blackout').click({ timeout: 2000 }).catch(() => undefined)
-        return await playback!
-          .getByTestId('playback-page')
-          .getAttribute('data-blackout')
-          .catch(() => null)
-      },
-      { timeout: 30_000, intervals: [200, 400, 800] }
-    )
-    .toBe('true')
-  await playback!.screenshot({ path: join(shots, 'playback-blackout.png') })
-  // The chrome is hidden while blanked, so a click on the surface must restore it.
-  await playback!.mouse.click(20, 20)
-  await expect(playback!.getByTestId('playback-page')).toHaveAttribute('data-blackout', 'false')
-  await expect(playback!.getByTestId('tool-blackout')).toBeVisible()
-})
-
-test('9. the pen tool records ink on the slide', async () => {
-  expect(playback).not.toBeNull()
-  await playback!.mouse.move(640, 360)
-  await playback!.getByTestId('tool-pen').click()
-  const layer = playback!.getByTestId('ink-layer')
-  await expect(layer).toBeVisible()
-  const box = await layer.boundingBox()
+test('8. the slide fills the screen without padding', async () => {
+  // A 16:9 deck on a 16:9 viewport must cover the whole area: the old layout kept a
+  // fixed 48px inset, which showed as a black border on every show.
+  const box = await win.getByTestId('playback-canvas').boundingBox()
   expect(box).not.toBeNull()
-  const { x, y, width, height } = box!
-  await playback!.mouse.move(x + width * 0.3, y + height * 0.4)
-  await playback!.mouse.down()
-  await playback!.mouse.move(x + width * 0.5, y + height * 0.55, { steps: 8 })
-  await playback!.mouse.move(x + width * 0.62, y + height * 0.45, { steps: 8 })
-  await playback!.mouse.up()
-  await playback!.screenshot({ path: join(shots, 'playback-ink.png') })
-  await playback!.getByTestId('tool-pointer').click()
+  // The e2e tsconfig has no DOM lib, so the page-side globals are reached
+  // through evaluate's own function scope rather than referenced directly.
+  const viewport = await win.evaluate(() => {
+    const g = globalThis as unknown as { innerWidth: number; innerHeight: number }
+    return { width: g.innerWidth, height: g.innerHeight }
+  })
+
+  const ratio = box!.width / box!.height
+  expect(Math.abs(ratio - 16 / 9)).toBeLessThan(0.05)
+
+  // At least one dimension must be flush with the edge.
+  const touchesEdge =
+    Math.abs(box!.width - viewport.width) < 2 || Math.abs(box!.height - viewport.height) < 2
+  expect(touchesEdge).toBe(true)
 })
 
-test('10. the whiteboard opens, takes ink, and closes with Escape', async () => {
-  expect(playback).not.toBeNull()
+test('9. the toolbar is translucent', async () => {
+  const alpha = await win.getByTestId('play-toolbar').evaluate((node) => {
+    const cluster = node.querySelector('.tool-cluster')
+    if (!cluster) return null
+    const g = globalThis as unknown as {
+      getComputedStyle(el: unknown): { backgroundColor: string }
+    }
+    const bg = g.getComputedStyle(cluster).backgroundColor
+    const match = /rgba?\(([^)]+)\)/.exec(bg)
+    if (!match) return null
+    const parts = match[1].split(',').map((v) => Number(v.trim()))
+    return parts.length === 4 ? parts[3] : 1
+  })
+  expect(alpha).not.toBeNull()
+  expect(alpha!).toBeGreaterThan(0.1)
+  expect(alpha!).toBeLessThan(0.9)
+})
 
-  // The board is a real drawing surface, not just a blanked slide.
+test('10. annotations survive switching back to the pointer tool', async () => {
+  // This is the regression that erased every stroke the moment the presenter
+  // returned to the pointer: the ink canvas was unmounted when not drawing.
+  await win.mouse.move(400, 300)
+  await win.getByTestId('tool-pen').click()
+  const canvas = win.getByTestId('playback-canvas')
+  const box = await canvas.boundingBox()
+  expect(box).not.toBeNull()
+
+  await win.mouse.move(box!.x + box!.width * 0.3, box!.y + box!.height * 0.4)
+  await win.mouse.down()
+  await win.mouse.move(box!.x + box!.width * 0.5, box!.y + box!.height * 0.5, { steps: 6 })
+  await win.mouse.move(box!.x + box!.width * 0.6, box!.y + box!.height * 0.45, { steps: 6 })
+  await win.mouse.up()
+
+  const paintedBefore = await win.getByTestId('ink-layer').evaluate((node) => {
+    const canvas = node as unknown as {
+      width: number
+      height: number
+      getContext(id: '2d'): { getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray } } | null
+    }
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return 0
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+    let painted = 0
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++
+    return painted
+  })
+  expect(paintedBefore).toBeGreaterThan(0)
+
+  // Switch to the pointer tool; the strokes must stay on screen.
+  await win.getByTestId('tool-pointer').click()
+  await expect(win.getByTestId('ink-layer')).toHaveCount(1)
+  const paintedAfter = await win.getByTestId('ink-layer').evaluate((node) => {
+    const canvas = node as unknown as {
+      width: number
+      height: number
+      getContext(id: '2d'): { getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray } } | null
+    }
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return 0
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+    let painted = 0
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++
+    return painted
+  })
+  expect(paintedAfter).toBe(paintedBefore)
+  await win.screenshot({ path: join(shots, 'playback-ink.png') })
+})
+
+test('11. undo removes the last stroke', async () => {
+  await win.mouse.move(400, 300)
+  const before = await win.getByTestId('ink-layer').evaluate((node) => {
+    const canvas = node as unknown as { width: number; height: number }
+    return canvas.width
+  })
+  expect(before).toBeGreaterThan(0)
+  await win.getByTestId('tool-undo').click()
+  const painted = await win.getByTestId('ink-layer').evaluate((node) => {
+    const canvas = node as unknown as {
+      width: number
+      height: number
+      getContext(id: '2d'): { getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray } } | null
+    }
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return 0
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+    let count = 0
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) count++
+    return count
+  })
+  expect(painted).toBe(0)
+})
+
+test('12. the whiteboard opens, takes ink, and closes with Escape', async () => {
+  await win.mouse.move(400, 300)
   await expect
     .poll(
       async () => {
-        await playback!.mouse.move(640, 400).catch(() => undefined)
-        await playback!
-          .getByTestId('tool-board')
-          .click({ timeout: 2000 })
-          .catch(() => undefined)
-        return await playback!
-          .getByTestId('whiteboard')
-          .isVisible()
-          .catch(() => false)
+        await win.getByTestId('tool-board').click({ timeout: 2000 }).catch(() => undefined)
+        return await win.getByTestId('whiteboard').isVisible().catch(() => false)
       },
-      { timeout: 30_000, intervals: [300, 800, 1500] }
+      { timeout: 20_000, intervals: [300, 800, 1500] }
     )
     .toBe(true)
 
-  const board = playback!.getByTestId('whiteboard')
+  const board = win.getByTestId('whiteboard')
   const box = await board.boundingBox()
   expect(box).not.toBeNull()
 
-  // Draw one stroke and confirm the pen actually marked the canvas.
-  await playback!.mouse.move(box!.x + box!.width * 0.3, box!.y + box!.height * 0.4)
-  await playback!.mouse.down()
-  await playback!.mouse.move(box!.x + box!.width * 0.5, box!.y + box!.height * 0.55, { steps: 8 })
-  await playback!.mouse.move(box!.x + box!.width * 0.7, box!.y + box!.height * 0.45, { steps: 8 })
-  await playback!.mouse.up()
+  await win.mouse.move(box!.x + box!.width * 0.3, box!.y + box!.height * 0.4)
+  await win.mouse.down()
+  await win.mouse.move(box!.x + box!.width * 0.5, box!.y + box!.height * 0.55, { steps: 8 })
+  await win.mouse.move(box!.x + box!.width * 0.7, box!.y + box!.height * 0.45, { steps: 8 })
+  await win.mouse.up()
 
-  // Count painted pixels so a board that merely renders as white cannot pass.
-  // The e2e tsconfig has no DOM lib, so the canvas is described structurally.
   const inked = await board.evaluate((node) => {
     const canvas = node as unknown as {
       width: number
       height: number
-      getContext(id: '2d'): {
-        getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray }
-      } | null
+      getContext(id: '2d'): { getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray } } | null
     }
     const ctx = canvas.getContext('2d')
     if (!ctx) return 0
@@ -261,30 +289,23 @@ test('10. the whiteboard opens, takes ink, and closes with Escape', async () => 
     return painted
   })
   expect(inked).toBeGreaterThan(0)
-  await playback!.screenshot({ path: join(shots, 'whiteboard.png') })
+  await win.screenshot({ path: join(shots, 'whiteboard.png') })
 
-  await playback!.keyboard.press('Escape')
+  await win.keyboard.press('Escape')
   await expect(board).toBeHidden()
 })
 
-test('11. the overview grid opens and closes', async () => {
-  expect(playback).not.toBeNull()
-  await playback!.keyboard.press('o')
-  await expect(playback!.getByTestId('overview-grid')).toBeVisible()
-  await playback!.screenshot({ path: join(shots, 'overview.png') })
-  await playback!.keyboard.press('Escape')
-  await expect(playback!.getByTestId('overview-grid')).toBeHidden()
+test('13. leaving playback returns to preview in the same window', async () => {
+  await win.getByTestId('tool-end').click({ timeout: 5000 }).catch(async () => {
+    await win.keyboard.press('Escape')
+  })
+  await expect.poll(async () => isFullScreen(), { timeout: 30_000 }).toBe(false)
+  await expect(win.getByTestId('preview-page')).toBeVisible()
+  // Still one window, and the deck is still mounted: nothing was reloaded.
+  expect(app.windows().length).toBe(1)
+  await expect(win.getByTestId('deck-name')).toHaveText(deckName)
 })
 
-test('12. Escape ends the show and returns to the preview window', async () => {
-  expect(playback).not.toBeNull()
-  // Escape closes the window from the keydown handler, so the matching keyup
-  // may never be delivered. Treat that as the expected outcome.
-  await playback!.keyboard.press('Escape').catch(() => undefined)
-  await expect.poll(async () => (await findPlayback()) === null, { timeout: 30_000 }).toBe(true)
-  await expect(preview.getByTestId('preview-page')).toBeVisible()
-})
-
-test('13. the window title carries the file name', async () => {
-  expect(await preview.title()).toContain(deckName)
+test('14. the window title carries the file name', async () => {
+  expect(await win.title()).toContain(deckName)
 })

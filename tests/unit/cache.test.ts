@@ -61,7 +61,9 @@ describe('DeckCache', () => {
     expect(hit?.meta.pageCount).toBe(3)
   })
 
-  it('ignores entries without a page count', () => {
+  // A missing page count used to discard the entry, which threw away a perfectly
+  // good conversion whenever the app closed before the renderer reported metrics.
+  it('keeps a usable entry even when the page count is not known yet', () => {
     const cache = new DeckCache(tempRoot())
     const key = cacheKey(base)
     const dir = cache.dirFor(key)
@@ -77,6 +79,27 @@ describe('DeckCache', () => {
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
       pageCount: 0
+    })
+    expect(cache.lookup(key)).not.toBeNull()
+  })
+
+  it('ignores an entry explicitly marked incomplete', () => {
+    const cache = new DeckCache(tempRoot())
+    const key = cacheKey(base)
+    const dir = cache.dirFor(key)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'deck.pdf'), Buffer.alloc(4096, 1))
+    cache.store(key, {
+      sourcePath: base.sourcePath,
+      sourceBytes: base.sourceBytes,
+      sourceMtimeMs: base.sourceMtimeMs,
+      engine: base.engine,
+      enginePath: base.enginePath,
+      appVersion: base.appVersion,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      pageCount: 0,
+      status: 'partial'
     })
     expect(cache.lookup(key)).toBeNull()
   })

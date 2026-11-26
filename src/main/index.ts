@@ -6,8 +6,9 @@ import { loadSettings, pushRecentFile } from './settings'
 import { registerAppScheme, registerAppProtocol } from './ipc/protocol'
 import { registerHandlers, setPendingOpenPath } from './ipc/handlers'
 import { engineStatus } from './engine'
-import { createPreviewWindow, getPreviewWindow } from './windows'
+import { createMainWindow, getPreviewWindow } from './windows'
 import { extensionOf, isSupportedExtension } from '../shared/formats'
+import { setLogSink } from './convert/logging'
 import type { ConvertContext } from './convert/pipeline'
 
 registerAppScheme()
@@ -42,21 +43,27 @@ function bootstrap(): void {
     }
     if (file) {
       setPendingOpenPath(file)
-      createPreviewWindow()
+      createMainWindow()
     }
   })
 
   app.whenReady().then(() => {
     initLog()
+    // Conversion modules stay Electron-free; point them at the file logger so
+    // soffice arguments, timings and stderr reach disk.
+    setLogSink(log)
 
     const userData = app.getPath('userData')
     const cacheRoot = join(userData, 'cache')
     const inkDir = join(userData, 'ink')
+    const profileRoot = join(userData, 'lo-profile')
     mkdirSync(cacheRoot, { recursive: true })
     mkdirSync(inkDir, { recursive: true })
+    mkdirSync(profileRoot, { recursive: true })
 
     const ctx: ConvertContext = {
       cacheRoot,
+      profileRoot,
       appVersion: app.getVersion(),
       engine: () => engineStatus(),
       onOpened: (filePath) => {
@@ -71,10 +78,10 @@ function bootstrap(): void {
     const startupFile = pendingFileFromArgv(process.argv)
     if (startupFile) setPendingOpenPath(startupFile)
 
-    createPreviewWindow()
+    createMainWindow()
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createPreviewWindow()
+      if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
     })
   })
 

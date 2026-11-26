@@ -16,14 +16,12 @@ interface AppState {
   loadingMessage: string
   loadingRatio: number
   error: { message: string; detail?: string } | null
-  drawerOpen: boolean
   ink: InkPage[]
   setEngine: (engine: EngineStatus | null) => void
   setDeck: (deck: DeckState) => void
   setPage: (page: number) => void
   setLoading: (loading: boolean, message?: string, ratio?: number) => void
   setError: (error: { message: string; detail?: string } | null) => void
-  toggleDrawer: (open?: boolean) => void
   setInk: (ink: InkPage[]) => void
   reset: () => void
 }
@@ -36,7 +34,6 @@ export const useAppStore = create<AppState>((set) => ({
   loadingMessage: '',
   loadingRatio: 0,
   error: null,
-  drawerOpen: false,
   ink: [],
   setEngine: (engine) => set({ engine }),
   setDeck: (deck) => set({ deck }),
@@ -44,7 +41,6 @@ export const useAppStore = create<AppState>((set) => ({
   setLoading: (loading, message = '', ratio = 0) =>
     set({ loading, loadingMessage: message, loadingRatio: ratio }),
   setError: (error) => set({ error }),
-  toggleDrawer: (open) => set((s) => ({ drawerOpen: open ?? !s.drawerOpen })),
   setInk: (ink) => set({ ink }),
   reset: () =>
     set({

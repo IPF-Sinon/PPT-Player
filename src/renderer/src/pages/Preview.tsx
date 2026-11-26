@@ -1,34 +1,39 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
-import type { DeckInfo, EngineStatus } from '@shared/types'
+import type { DeckInfo } from '@shared/types'
 import { zh } from '@shared/strings.zh'
 import { useAppStore } from '../store'
-import { loadPdf, readFirstPageSize, readPageSizes } from '../lib/pdf'
+import { loadPdf, preloadPdfjs, readFirstPageSize, readPageSizes } from '../lib/pdf'
 import { RenderQueue } from '../lib/render'
 import { ThumbRail } from '../components/ThumbRail'
 import { SlideStage } from '../components/SlideStage'
-import { ChevronDown, ChevronUp, Close, Folder, Info, Minus, Play, Plus, Settings, Trash } from '../components/icons'
-import { HelpSheet, SettingsSheet } from '../components/Sheets'
+import { ChevronDown, ChevronUp, Close, Folder, Play, Settings } from '../components/icons'
+import { SettingsSheet } from '../components/Sheets'
 import '../styles/preview.css'
 
 export default function PreviewPage() {
   const store = useAppStore()
   const [recent, setRecent] = useState<string[]>([])
-  const [zoom, setZoom] = useState(1)
   const [dragOver, setDragOver] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [helpOpen, setHelpOpen] = useState(false)
   const queue = useMemo(() => new RenderQueue(), [])
   const openToken = useRef(0)
+  /** Deck currently mounted, so its PDF and main-process record can be released. */
+  const mountedDeckId = useRef<string | null>(null)
 
-  const refreshEngine = useCallback(async (): Promise<void> => {
-    const status: EngineStatus = await window.api.engineStatus()
-    store.setEngine(status)
-  }, [store])
-
-  const refreshRecent = useCallback(async (): Promise<void> => {
-    const settings = await window.api.getSettings()
-    setRecent(settings.recentFiles)
+  /** Drop the previous document and free its main-process entry. */
+  const releaseCurrent = useCallback(async (): Promise<void> => {
+    const previous = useAppStore.getState().deck
+    const previousId = mountedDeckId.current
+    mountedDeckId.current = null
+    if (previous.doc) {
+      try {
+        await previous.doc.destroy()
+      } catch {
+        // A document that is already gone is fine.
+      }
+    }
+    if (previousId) await window.api.closeDeck(previousId)
   }, [])
 
   const openFile = useCallback(
@@ -36,6 +41,7 @@ export default function PreviewPage() {
       const token = ++openToken.current
       store.setError(null)
       store.setLoading(true, zh.preview.stageProbe, 0.05)
+
       const unsubscribe = window.api.onProgress((progress) => {
         if (token !== openToken.current) return
         const message =
@@ -50,9 +56,8 @@ export default function PreviewPage() {
       })
 
       try {
-        console.log('[preview] opening', filePath)
+        await releaseCurrent()
         const result = await window.api.open(filePath)
-        console.log('[preview] open result', result.ok, result.ok ? result.info.deckId : result.error.code)
         if (token !== openToken.current) return
         if (!result.ok) {
           store.setError({ message: result.error.message, detail: result.error.detail })
@@ -63,33 +68,26 @@ export default function PreviewPage() {
       } finally {
         unsubscribe()
         if (token === openToken.current) store.setLoading(false)
-        await refreshRecent()
       }
     },
-    [store, refreshRecent]
+    [store, releaseCurrent]
   )
 
   const mountDeck = useCallback(
     async (info: DeckInfo, token: number): Promise<void> => {
-      const url = (await window.api.deckUrl(info.deckId)) ?? ''
-      console.log('[preview] mounting deck', info.deckId, url)
+      const url = window.api.deckUrl(info.deckId)
       try {
         const doc = await loadPdf(url)
 
-        // Paint as soon as the first page is measured. Measuring every page first
-        // is what made a large deck sit on 正在转换 with nothing on screen.
+        // Show the first slide as soon as it is measured. Waiting for every page
+        // size before painting is what left large decks sitting on a spinner.
         const first = await readFirstPageSize(doc)
-        const initial = {
-          ...info,
-          pageCount: doc.numPages,
-          pageSizes: first ? [first] : []
-        }
-        store.setDeck({ info: initial, doc, url })
+        store.setDeck({ info: { ...info, pageCount: doc.numPages, pageSizes: first ? [first] : [] }, doc, url })
         store.setPage(0)
+        mountedDeckId.current = info.deckId
         document.title = zh.windowTitle(info.sourcePath.split(/[\\/]/).pop() ?? '')
-        console.log('[preview] first page ready', doc.numPages, 'pages')
 
-        // Fill in the remaining page sizes in the background for the overview grid.
+        // Remaining page sizes arrive in batches for the thumbnail rail.
         void readPageSizes(doc, (sizes) => {
           if (openToken.current !== token) return
           const current = useAppStore.getState().deck.info
@@ -103,7 +101,6 @@ export default function PreviewPage() {
         const ink = await window.api.loadInk(info.deckId)
         store.setInk(ink)
       } catch (err) {
-        console.error('[preview] failed to open the converted PDF', err)
         store.setError({ message: '无法解析转换后的 PDF', detail: String(err) })
       }
     },
@@ -114,21 +111,22 @@ export default function PreviewPage() {
     const onKey = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
-      const total = useAppStore.getState().deck.info?.pageCount ?? 0
+      const state = useAppStore.getState()
+      const total = state.deck.info?.pageCount ?? 0
       if (total === 0) return
-      const current = useAppStore.getState().currentPage
+      const current = state.currentPage
       if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'PageDown') {
         event.preventDefault()
-        useAppStore.getState().setPage(Math.min(total - 1, current + 1))
+        state.setPage(Math.min(total - 1, current + 1))
       } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'PageUp') {
         event.preventDefault()
-        useAppStore.getState().setPage(Math.max(0, current - 1))
+        state.setPage(Math.max(0, current - 1))
       } else if (event.key === 'Home') {
         event.preventDefault()
-        useAppStore.getState().setPage(0)
+        state.setPage(0)
       } else if (event.key === 'End') {
         event.preventDefault()
-        useAppStore.getState().setPage(total - 1)
+        state.setPage(total - 1)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -136,17 +134,29 @@ export default function PreviewPage() {
   }, [])
 
   useEffect(() => {
-    void refreshEngine()
-    void refreshRecent()
+    let cancelled = false
+
+    // One round trip for everything the first screen needs. Engine status is not
+    // part of it: probing for LibreOffice is only useful once a deck is opened.
+    void (async () => {
+      const boot = await window.api.bootstrap()
+      if (cancelled) return
+      setRecent(boot.settings.recentFiles)
+      if (boot.pendingOpenPath) await openFile(boot.pendingOpenPath)
+    })()
+
     const off = window.api.onExternalOpen((path) => {
       void openFile(path)
     })
-    void (async () => {
-      const pending = await window.api.takePendingOpen()
-      if (pending) await openFile(pending)
-    })()
-    return off
-  }, [refreshEngine, refreshRecent, openFile])
+
+    // Warm the parser in idle time so the first real open does not pay for it.
+    preloadPdfjs()
+
+    return () => {
+      cancelled = true
+      off()
+    }
+  }, [openFile])
 
   const pick = async (): Promise<void> => {
     const path = await window.api.pickFile()
@@ -158,7 +168,8 @@ export default function PreviewPage() {
     setDragOver(false)
     const file = event.dataTransfer.files.item(0)
     if (!file) return
-    const path = (file as File & { path?: string }).path
+    // Electron 32 removed File.path; the path must come from the preload bridge.
+    const path = window.api.getPathForFile(file)
     if (path) await openFile(path)
   }
 
@@ -199,20 +210,6 @@ export default function PreviewPage() {
           ) : null}
         </div>
         <div className="topbar-spacer" />
-        <span className="engine-dot" data-state={store.engine?.available ? 'ok' : 'none'} data-testid="engine-dot">
-          <i />
-          {store.engine?.available ? zh.engine.bundled : zh.engine.none}
-        </span>
-        <button
-          type="button"
-          className="icon-btn"
-          title={zh.common.help}
-          aria-label={zh.common.help}
-          data-testid="open-help"
-          onClick={() => setHelpOpen(true)}
-        >
-          <Info size={17} />
-        </button>
         <button
           type="button"
           className="icon-btn"
@@ -237,20 +234,16 @@ export default function PreviewPage() {
       <div className="preview-body">
         <ThumbRail
           doc={store.deck.doc}
+          deckId={info?.deckId ?? ''}
           pageCount={pageCount}
           currentPage={pageIndex}
           queue={queue}
           onSelect={(page) => store.setPage(page)}
         />
 
-        <div className="stage-wrap" style={{ position: 'relative', display: 'flex', minWidth: 0 }}>
+        <div className="stage-wrap">
           {store.deck.doc ? (
-            <SlideStage
-              doc={store.deck.doc}
-              pageIndex={pageIndex}
-              zoom={zoom}
-              onDoubleClick={() => void startShow()}
-            />
+            <SlideStage doc={store.deck.doc} pageIndex={pageIndex} onDoubleClick={() => void startShow()} />
           ) : (
             <div className="stage" data-testid="stage-empty">
               <div className="stage-empty" data-over={dragOver}>
@@ -287,6 +280,17 @@ export default function PreviewPage() {
                 <div className="progress-fill" style={{ width: Math.round(store.loadingRatio * 100) + '%' }} />
               </div>
               <span className="progress-text">{store.loadingMessage || zh.preview.converting}</span>
+              <button
+                type="button"
+                className="btn"
+                data-testid="cancel-convert"
+                onClick={() => {
+                  void window.api.cancelOpen()
+                  store.setLoading(false)
+                }}
+              >
+                {zh.common.cancel}
+              </button>
             </div>
           ) : null}
 
@@ -300,16 +304,6 @@ export default function PreviewPage() {
                   <button type="button" className="btn" onClick={() => void window.api.openLog()}>
                     {zh.engine.openLog}
                   </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={async () => {
-                      const status = await window.api.recheckEngine()
-                      store.setEngine(status)
-                    }}
-                  >
-                    {zh.engine.recheck}
-                  </button>
                   <button type="button" className="btn" onClick={() => store.setError(null)}>
                     {zh.common.close}
                   </button>
@@ -318,50 +312,6 @@ export default function PreviewPage() {
             </div>
           ) : null}
         </div>
-
-        {store.drawerOpen && info ? (
-          <aside className="drawer" data-testid="info-drawer">
-            <h3>{zh.preview.info}</h3>
-            <dl>
-              <dt>{zh.preview.format}</dt>
-              <dd>{info.format.label}</dd>
-              <dt>{zh.preview.container}</dt>
-              <dd>{info.format.container}</dd>
-              <dt>{zh.preview.pages}</dt>
-              <dd>{info.pageCount}</dd>
-              <dt>{zh.preview.pageSize}</dt>
-              <dd>
-                {info.pageSizes[0]
-                  ? Math.round(info.pageSizes[0].width) + ' × ' + Math.round(info.pageSizes[0].height) + ' pt'
-                  : '—'}
-              </dd>
-              <dt>{zh.preview.encrypted}</dt>
-              <dd>{info.format.encrypted ? '是' : '否'}</dd>
-              <dt>{zh.preview.engine}</dt>
-              <dd>{info.enginePath}</dd>
-              <dt>{zh.preview.convertTime}</dt>
-              <dd>{info.convertMs} ms</dd>
-            </dl>
-            <div className="drawer-actions">
-              <button type="button" className="btn" onClick={() => void window.api.revealCache()}>
-                {zh.common.revealCache}
-              </button>
-              <button type="button" className="btn" onClick={() => void window.api.openLog()}>
-                {zh.common.openLog}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={async () => {
-                  await window.api.clearCache()
-                }}
-              >
-                <Trash size={14} />
-                {zh.preview.clearCache}
-              </button>
-            </div>
-          </aside>
-        ) : null}
       </div>
 
       <footer className="bottombar">
@@ -391,31 +341,9 @@ export default function PreviewPage() {
           </button>
         </div>
 
-        <div className="bottombar-group">
-          <button type="button" className="icon-btn" onClick={() => setZoom((z) => Math.max(0.4, z - 0.1))}>
-            <Minus size={15} />
-          </button>
-          <span className="zoom-label">{Math.round(zoom * 100)}%</span>
-          <button type="button" className="icon-btn" onClick={() => setZoom((z) => Math.min(3, z + 0.1))}>
-            <Plus size={15} />
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={() => setZoom(1)}>
-            {zh.preview.fitWindow}
-          </button>
-        </div>
-
         <div className="topbar-spacer" />
 
         <div className="bottombar-group">
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={() => store.toggleDrawer()}
-            aria-label={zh.preview.info}
-            data-testid="toggle-drawer"
-          >
-            <Info size={16} />
-          </button>
           <button
             type="button"
             className="btn"
@@ -442,10 +370,12 @@ export default function PreviewPage() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSaved={() => {
-          void refreshEngine()
+          void (async () => {
+            const settings = await window.api.getSettings()
+            setRecent(settings.recentFiles)
+          })()
         }}
       />
-      <HelpSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   )
 }

@@ -1,51 +1,50 @@
 import { useEffect, useRef } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { InkStroke } from '@shared/types'
+import { drawStroke, paintStrokes, sizeCanvasToBox } from '../lib/stroke-canvas'
 
 interface InkLayerProps {
-  width: number
-  height: number
+  /** Bumped whenever the slide box is remeasured. */
+  boxWidth: number
+  boxHeight: number
   strokes: InkStroke[]
-  active: boolean
+  /** Drawing is only captured in pen or eraser mode. */
+  drawing: boolean
   tool: 'pen' | 'eraser'
   color: string
   widthPx: number
   onCommit: (stroke: InkStroke) => void
 }
 
-function drawStroke(ctx: CanvasRenderingContext2D, stroke: InkStroke, w: number, h: number): void {
-  const pts = stroke.points
-  if (pts.length < 4) return
-  ctx.save()
-  ctx.strokeStyle = stroke.color
-  ctx.lineWidth = stroke.width
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  if (stroke.tool === 'highlighter') ctx.globalAlpha = 0.35
-  if (stroke.tool === 'eraser') ctx.globalCompositeOperation = 'destination-out'
-  ctx.beginPath()
-  ctx.moveTo(pts[0] * w, pts[1] * h)
-  for (let i = 2; i + 1 < pts.length; i += 2) {
-    ctx.lineTo(pts[i] * w, pts[i + 1] * h)
-  }
-  ctx.stroke()
-  ctx.restore()
-}
-
+/**
+ * Annotation layer over the slide.
+ *
+ * It stays mounted when the pointer tool is active: unmounting the canvas used to
+ * erase every stroke the moment the presenter switched back to pointer.
+ */
 export function InkLayer(props: InkLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const drawingRef = useRef<InkStroke | null>(null)
+  const strokesRef = useRef<InkStroke[]>(props.strokes)
+  const dprRef = useRef(1)
+
+  strokesRef.current = props.strokes
+
+  // Resize and repaint are separate concerns: resizing must not depend on strokes,
+  // or every finished stroke would rebind the observer and reallocate the canvas.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    if (props.boxWidth < 1 || props.boxHeight < 1) return
+    dprRef.current = sizeCanvasToBox(canvas, props.boxWidth, props.boxHeight)
+    paintStrokes(canvas, strokesRef.current, dprRef.current)
+  }, [props.boxWidth, props.boxHeight])
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    for (const stroke of props.strokes) drawStroke(ctx, stroke, canvas.width, canvas.height)
-  }, [props.strokes, props.width, props.height])
-
-  if (!props.active) return null
+    paintStrokes(canvas, props.strokes, dprRef.current)
+  }, [props.strokes])
 
   const pointOf = (event: ReactPointerEvent<HTMLCanvasElement>): [number, number] => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -53,40 +52,45 @@ export function InkLayer(props: InkLayerProps) {
   }
 
   const onDown = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
+    if (!props.drawing) return
     event.currentTarget.setPointerCapture(event.pointerId)
     const [x, y] = pointOf(event)
-    drawingRef.current = {
-      tool: props.tool === 'eraser' ? 'eraser' : 'pen',
+    const stroke: InkStroke = {
+      tool: props.tool,
       color: props.color,
       width: props.widthPx,
       points: [x, y]
     }
+    drawingRef.current = stroke
+
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
-    if (ctx && canvas) drawStroke(ctx, drawingRef.current, canvas.width, canvas.height)
+    if (canvas && ctx) drawStroke(ctx, stroke, canvas.width, canvas.height, dprRef.current)
   }
 
   const onMove = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     const current = drawingRef.current
     if (!current) return
     const [x, y] = pointOf(event)
-    const prev = current.points
-    current.points = [...prev, x, y]
+    // Push in place: rebuilding the array on every pointermove is quadratic in
+    // stroke length and shows up as GC stutter on long annotations.
+    const before = current.points.length
+    current.points.push(x, y)
+
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
-    if (!ctx || !canvas) return
-    drawStroke(
-      ctx,
-      { ...current, points: prev.slice(-2).concat([x, y]) },
-      canvas.width,
-      canvas.height
-    )
+    if (!canvas || !ctx) return
+    const segment: InkStroke = {
+      ...current,
+      points: [current.points[before - 2], current.points[before - 1], x, y]
+    }
+    drawStroke(ctx, segment, canvas.width, canvas.height, dprRef.current)
   }
 
   const onUp = (): void => {
     const current = drawingRef.current
     drawingRef.current = null
-    if (!current || current.points.length < 4) return
+    if (!current) return
     props.onCommit(current)
   }
 
@@ -94,9 +98,9 @@ export function InkLayer(props: InkLayerProps) {
     <canvas
       ref={canvasRef}
       className="ink-layer"
-      width={props.width}
-      height={props.height}
       data-testid="ink-layer"
+      data-drawing={props.drawing}
+      style={{ pointerEvents: props.drawing ? 'auto' : 'none' }}
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}

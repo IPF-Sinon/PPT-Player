@@ -185,7 +185,17 @@ $probePaths = @(
   'program\xpdfimport.exe', 'program\pdfiumlo.dll',
   'program\classes',
   'share\xpdfimport',
-  'share\extensions'
+  'share\extensions',
+  # Authoring-only data: word books, autocorrect, tip-of-the-day, colour palettes,
+  # document classification and number-to-text. None is read by a PDF export, but
+  # each is probed rather than assumed.
+  'share\wordbook',
+  'share\autocorr',
+  'share\tipoftheday',
+  'share\palette',
+  'share\classification',
+  'share\numbertext',
+  'share\fingerprint'
 )
 
 $dropped = @()

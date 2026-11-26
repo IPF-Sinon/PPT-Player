@@ -84,7 +84,12 @@ function streamFile(filePath: string, request: Request): Response {
       if (!Number.isFinite(start) || !Number.isFinite(end)) return notFound()
       start = Math.max(0, Math.min(start, stat.size - 1))
       end = Math.max(start, Math.min(end, stat.size - 1))
-      const body = Readable.toWeb(createReadStream(filePath, { start, end })) as unknown as ReadableStream
+      const stream = createReadStream(filePath, { start, end })
+      // pdf.js aborts range requests constantly while scrolling. Without this the
+      // handle stays open and Windows then refuses to delete the cache directory
+      // with EBUSY.
+      request.signal?.addEventListener('abort', () => stream.destroy(), { once: true })
+      const body = Readable.toWeb(stream) as unknown as ReadableStream
       return new Response(body, {
         status: 206,
         headers: {
@@ -99,7 +104,9 @@ function streamFile(filePath: string, request: Request): Response {
     }
   }
 
-  const body = Readable.toWeb(createReadStream(filePath)) as unknown as ReadableStream
+  const stream = createReadStream(filePath)
+  request.signal?.addEventListener('abort', () => stream.destroy(), { once: true })
+  const body = Readable.toWeb(stream) as unknown as ReadableStream
   return new Response(body, {
     status: 200,
     headers: {

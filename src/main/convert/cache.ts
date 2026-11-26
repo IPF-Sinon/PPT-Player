@@ -13,6 +13,8 @@ export interface CacheEntryMeta {
   createdAt: number
   lastUsedAt: number
   pageCount: number
+  /** 'ready' once deck.pdf is complete; absent on entries written by older builds. */
+  status?: 'ready' | 'partial'
 }
 
 export interface CacheHit {
@@ -59,8 +61,11 @@ export class DeckCache {
     if (!existsSync(pdfPath) || !existsSync(metaPath)) return null
     try {
       const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as CacheEntryMeta
-      if (!meta.pageCount || meta.pageCount < 1) return null
+      // A usable entry needs a real PDF, not a page count: the count is written by
+      // the converter, and an open abandoned before the renderer reported metrics
+      // used to leave 0 here and silently discard an otherwise valid conversion.
       if (statSync(pdfPath).size < 1024) return null
+      if (meta.status && meta.status !== 'ready') return null
       meta.lastUsedAt = Date.now()
       writeFileSync(metaPath, JSON.stringify(meta), 'utf8')
       return { dir, pdfPath, meta }
