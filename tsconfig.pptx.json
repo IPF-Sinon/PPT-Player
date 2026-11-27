@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.web.json",
+  "compilerOptions": {
+    "composite": false,
+    "types": ["node"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  "include": [
+    "src/renderer/src/**/*",
+    "src/shared/**/*",
+    "src/main/pptx/**/*",
+    "src/preload/index.d.ts",
+    "tests/unit/pptx-animations.test.ts",
+    "tests/unit/pptx-parse.test.ts"
+  ]
+}

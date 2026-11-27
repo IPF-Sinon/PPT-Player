@@ -1,46 +1,104 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
-import type { DeckInfo } from '@shared/types'
 import { zh } from '@shared/strings.zh'
 import { useAppStore } from '../store'
 import { loadPdf, preloadPdfjs, readFirstPageSize, readPageSizes } from '../lib/pdf'
 import { RenderQueue } from '../lib/render'
+import { loadNativeDeck } from '../lib/pptx/deck'
 import { ThumbRail } from '../components/ThumbRail'
 import { SlideStage } from '../components/SlideStage'
+import { PptxSlideView } from '../components/PptxSlideView'
+import { TabBar } from '../components/TabBar'
 import { ChevronDown, ChevronUp, Close, Folder, Play, Settings } from '../components/icons'
 import { SettingsSheet } from '../components/Sheets'
 import '../styles/preview.css'
+import '../styles/pptx.css'
 
 export default function PreviewPage() {
-  const store = useAppStore()
+  const tabs = useAppStore((s) => s.tabs)
+  const activeTabId = useAppStore((s) => s.activeTabId)
+  const tab = useMemo(() => tabs.find((t) => t.tabId === activeTabId) ?? null, [tabs, activeTabId])
   const [recent, setRecent] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const queue = useMemo(() => new RenderQueue(), [])
   const openToken = useRef(0)
-  /** Deck currently mounted, so its PDF and main-process record can be released. */
-  const mountedDeckId = useRef<string | null>(null)
 
-  /** Drop the previous document and free its main-process entry. */
-  const releaseCurrent = useCallback(async (): Promise<void> => {
-    const previous = useAppStore.getState().deck
-    const previousId = mountedDeckId.current
-    mountedDeckId.current = null
-    if (previous.doc) {
+  const store = useAppStore
+  const update = store.getState().updateTab
+
+  /** Release whatever the given tab holds, in renderer and main. */
+  const releaseTab = useCallback(async (tabId: string): Promise<void> => {
+    const target = useAppStore.getState().tabs.find((t) => t.tabId === tabId)
+    if (!target) return
+    if (target.pdfDoc) {
       try {
-        await previous.doc.destroy()
+        await target.pdfDoc.destroy()
       } catch {
-        // A document that is already gone is fine.
+        // Already gone is fine.
       }
     }
-    if (previousId) await window.api.closeDeck(previousId)
+    if (target.deckId) await window.api.closeDeck(target.deckId)
   }, [])
+
+  const mountPdf = useCallback(
+    async (
+      tabId: string,
+      deckId: string,
+      url: string,
+      token: number,
+      extra: Partial<Parameters<typeof update>[1]> = {}
+    ): Promise<void> => {
+      const doc = await loadPdf(url)
+      const first = await readFirstPageSize(doc)
+      if (token !== openToken.current) {
+        await doc.destroy()
+        return
+      }
+      update(tabId, {
+        pdfDoc: doc,
+        pdfUrl: url,
+        deckId,
+        pageCount: doc.numPages,
+        pageSizes: first ? [first] : [],
+        status: 'ready',
+        progressRatio: 1,
+        ...extra
+      })
+
+      void readPageSizes(doc, (sizes) => {
+        if (openToken.current !== token) return
+        update(tabId, { pageSizes: sizes })
+      }).then((sizes) => {
+        if (openToken.current !== token) return
+        void window.api.reportMetrics(deckId, doc.numPages, sizes)
+      })
+    },
+    [update]
+  )
 
   const openFile = useCallback(
     async (filePath: string): Promise<void> => {
       const token = ++openToken.current
-      store.setError(null)
-      store.setLoading(true, zh.preview.stageProbe, 0.05)
+      const tabId = useAppStore.getState().openTab(filePath)
+      const existing = useAppStore.getState().tabs.find((t) => t.tabId === tabId)
+
+      // Re-focusing an already loaded tab must not re-open anything.
+      if (existing && existing.status === 'ready' && existing.filePath === filePath) {
+        if (existing.tabId !== useAppStore.getState().activeTabId) return
+      }
+
+      await releaseTab(tabId)
+      update(tabId, {
+        status: 'loading',
+        error: null,
+        progressRatio: 0.05,
+        progressMessage: zh.preview.stageProbe,
+        pdfDoc: null,
+        pdfUrl: null,
+        nativeDeck: null,
+        deckId: ''
+      })
 
       const unsubscribe = window.api.onProgress((progress) => {
         if (token !== openToken.current) return
@@ -52,138 +110,206 @@ export default function PreviewPage() {
               : progress.stage === 'done'
                 ? zh.preview.stageDone
                 : zh.preview.stageProbe
-        store.setLoading(true, message, progress.ratio)
+        update(tabId, { progressMessage: message, progressRatio: progress.ratio })
       })
 
       try {
-        await releaseCurrent()
+        // Native first: a PPTX needs no conversion at all.
+        update(tabId, { progressMessage: '正在建立索引', progressRatio: 0.2 })
+        const native = await window.api.openNative(filePath)
+        if (token !== openToken.current) return
+
+        if (native && native.ok) {
+          const deck = await loadNativeDeck(native.deckId, native.slidePaths, native.slideSize, window.api)
+          if (token !== openToken.current) return
+          update(tabId, {
+            engineMode: 'native-pptx',
+            deckId: native.deckId,
+            nativeDeck: deck,
+            pageCount: native.slideCount,
+            pageSizes: [{ width: native.slideSize.width, height: native.slideSize.height }],
+            hasComplexObjects: deck.hasComplexObjects,
+            status: 'ready',
+            progressRatio: 1,
+            convertMs: 0
+          })
+          const ink = await window.api.loadInk(native.deckId)
+          update(tabId, { ink })
+          document.title = zh.windowTitle(existing?.title ?? '')
+          return
+        }
+
+        // Fall back to conversion for legacy, ODP and encrypted-free decks.
         const result = await window.api.open(filePath)
         if (token !== openToken.current) return
         if (!result.ok) {
-          store.setError({ message: result.error.message, detail: result.error.detail })
-          store.setLoading(false)
+          update(tabId, { status: 'error', error: { message: result.error.message, detail: result.error.detail } })
           return
         }
-        await mountDeck(result.info, token)
+        const info = result.info
+        await mountPdf(tabId, info.deckId, window.api.deckUrl(info.deckId), token, {
+          engineMode: 'libreoffice',
+          convertMs: info.convertMs,
+          cached: info.cached
+        })
+        const ink = await window.api.loadInk(info.deckId)
+        update(tabId, { ink })
+        document.title = zh.windowTitle(existing?.title ?? '')
+      } catch (err) {
+        update(tabId, { status: 'error', error: { message: '无法打开该文件', detail: String(err) } })
       } finally {
         unsubscribe()
-        if (token === openToken.current) store.setLoading(false)
       }
     },
-    [store, releaseCurrent]
+    [mountPdf, releaseTab, update]
   )
 
-  const mountDeck = useCallback(
-    async (info: DeckInfo, token: number): Promise<void> => {
-      const url = window.api.deckUrl(info.deckId)
-      try {
-        const doc = await loadPdf(url)
-
-        // Show the first slide as soon as it is measured. Waiting for every page
-        // size before painting is what left large decks sitting on a spinner.
-        const first = await readFirstPageSize(doc)
-        store.setDeck({ info: { ...info, pageCount: doc.numPages, pageSizes: first ? [first] : [] }, doc, url })
-        store.setPage(0)
-        mountedDeckId.current = info.deckId
-        document.title = zh.windowTitle(info.sourcePath.split(/[\\/]/).pop() ?? '')
-
-        // Remaining page sizes arrive in batches for the thumbnail rail.
-        void readPageSizes(doc, (sizes) => {
-          if (openToken.current !== token) return
-          const current = useAppStore.getState().deck.info
-          if (!current || current.deckId !== info.deckId) return
-          store.setDeck({ info: { ...current, pageSizes: sizes }, doc, url })
-        }).then((sizes) => {
-          if (openToken.current !== token) return
-          void window.api.reportMetrics(info.deckId, doc.numPages, sizes)
+  /** Switch the active tab between native rendering and conversion. */
+  const switchEngine = useCallback(
+    async (mode: 'native-pptx' | 'libreoffice'): Promise<void> => {
+      if (!tab) return
+      const token = ++openToken.current
+      await releaseTab(tab.tabId)
+      update(tab.tabId, { engineMode: mode, status: 'loading', error: null, pdfDoc: null, nativeDeck: null })
+      if (mode === 'libreoffice') {
+        const result = await window.api.open(tab.filePath)
+        if (token !== openToken.current) return
+        if (!result.ok) {
+          update(tab.tabId, { status: 'error', error: { message: result.error.message } })
+          return
+        }
+        await mountPdf(tab.tabId, result.info.deckId, window.api.deckUrl(result.info.deckId), token, {
+          engineMode: 'libreoffice'
         })
-
-        const ink = await window.api.loadInk(info.deckId)
-        store.setInk(ink)
-      } catch (err) {
-        store.setError({ message: '无法解析转换后的 PDF', detail: String(err) })
+        return
       }
+      const native = await window.api.openNative(tab.filePath)
+      if (token !== openToken.current) return
+      if (!native || !native.ok) {
+        update(tab.tabId, { status: 'error', error: { message: '该文件不支持极速动画模式' } })
+        return
+      }
+      const deck = await loadNativeDeck(native.deckId, native.slidePaths, native.slideSize, window.api)
+      update(tab.tabId, {
+        engineMode: 'native-pptx',
+        deckId: native.deckId,
+        nativeDeck: deck,
+        pageCount: native.slideCount,
+        pageSizes: [{ width: native.slideSize.width, height: native.slideSize.height }],
+        hasComplexObjects: deck.hasComplexObjects,
+        status: 'ready',
+        progressRatio: 1
+      })
     },
-    [store]
+    [tab, releaseTab, update, mountPdf]
   )
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
-      const state = useAppStore.getState()
-      const total = state.deck.info?.pageCount ?? 0
-      if (total === 0) return
-      const current = state.currentPage
-      if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'PageDown') {
-        event.preventDefault()
-        state.setPage(Math.min(total - 1, current + 1))
-      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'PageUp') {
-        event.preventDefault()
-        state.setPage(Math.max(0, current - 1))
-      } else if (event.key === 'Home') {
-        event.preventDefault()
-        state.setPage(0)
-      } else if (event.key === 'End') {
-        event.preventDefault()
-        state.setPage(total - 1)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  const closeTab = useCallback(
+    async (tabId: string): Promise<void> => {
+      await releaseTab(tabId)
+      useAppStore.getState().closeTab(tabId)
+    },
+    [releaseTab]
+  )
 
-  useEffect(() => {
-    let cancelled = false
-
-    // One round trip for everything the first screen needs. Engine status is not
-    // part of it: probing for LibreOffice is only useful once a deck is opened.
-    void (async () => {
-      const boot = await window.api.bootstrap()
-      if (cancelled) return
-      setRecent(boot.settings.recentFiles)
-      if (boot.pendingOpenPath) await openFile(boot.pendingOpenPath)
-    })()
-
-    const off = window.api.onExternalOpen((path) => {
-      void openFile(path)
-    })
-
-    // Warm the parser in idle time so the first real open does not pay for it.
-    preloadPdfjs()
-
-    return () => {
-      cancelled = true
-      off()
-    }
-  }, [openFile])
-
-  const pick = async (): Promise<void> => {
+  const pick = useCallback(async (): Promise<void> => {
     const path = await window.api.pickFile()
     if (path) await openFile(path)
-  }
+  }, [openFile])
 
   const onDrop = async (event: ReactDragEvent<HTMLDivElement>): Promise<void> => {
     event.preventDefault()
     setDragOver(false)
     const file = event.dataTransfer.files.item(0)
     if (!file) return
-    // Electron 32 removed File.path; the path must come from the preload bridge.
+    // Electron 32 removed File.path; the path comes from the preload bridge.
     const path = window.api.getPathForFile(file)
     if (path) await openFile(path)
   }
 
-  const startShow = async (fromStart = false): Promise<void> => {
-    const info = store.deck.info
-    if (!info) return
-    await window.api.enterPlayback(info.deckId, fromStart ? 0 : store.currentPage)
-  }
+  const startShow = useCallback(
+    async (fromStart = false): Promise<void> => {
+      if (!tab) return
+      if (fromStart) useAppStore.getState().setPage(tab.tabId, 0)
+      await window.api.enterPlayback(tab.deckId, fromStart ? 0 : tab.currentPage)
+    },
+    [tab]
+  )
 
-  const pageCount = store.deck.info?.pageCount ?? 0
-  const pageIndex = store.currentPage
-  const info = store.deck.info
-  const firstSize = info?.pageSizes?.[0]
-  const slideRatio = firstSize && firstSize.height > 0 ? firstSize.width / firstSize.height : 16 / 9
+  // Startup: one round trip, then the tab bar and the deck.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const boot = await window.api.bootstrap()
+      if (cancelled) return
+      setRecent(boot.settings.recentFiles)
+      if (boot.pendingOpenPath) await openFile(boot.pendingOpenPath)
+    })()
+    const off = window.api.onExternalOpen((path) => {
+      void openFile(path)
+    })
+    preloadPdfjs()
+    return () => {
+      cancelled = true
+      off()
+    }
+    // openFile is stable; re-running this would re-open the launch file.
+  }, [openFile])
+
+  // Keyboard: F5 starts the show, Ctrl+T opens, Ctrl+W closes, Ctrl+Tab cycles.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null
+      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')
+
+      if (event.key === 'F5') {
+        event.preventDefault()
+        void startShow(!event.shiftKey)
+        return
+      }
+      if (event.ctrlKey && event.key.toLowerCase() === 't') {
+        event.preventDefault()
+        void pick()
+        return
+      }
+      if (event.ctrlKey && event.key.toLowerCase() === 'w') {
+        event.preventDefault()
+        const active = useAppStore.getState().activeTabId
+        if (active) void closeTab(active)
+        return
+      }
+      if (event.ctrlKey && event.key === 'Tab') {
+        event.preventDefault()
+        useAppStore.getState().cycleTab(event.shiftKey ? -1 : 1)
+        return
+      }
+      if (typing) return
+
+      const state = useAppStore.getState()
+      const current = state.tabs.find((t) => t.tabId === state.activeTabId)
+      if (!current || current.pageCount === 0) return
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'PageDown') {
+        event.preventDefault()
+        state.setPage(current.tabId, current.currentPage + 1)
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'PageUp') {
+        event.preventDefault()
+        state.setPage(current.tabId, current.currentPage - 1)
+      } else if (event.key === 'Home') {
+        event.preventDefault()
+        state.setPage(current.tabId, 0)
+      } else if (event.key === 'End') {
+        event.preventDefault()
+        state.setPage(current.tabId, current.pageCount - 1)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [startShow, pick, closeTab])
+
+  const pageCount = tab?.pageCount ?? 0
+  const pageIndex = tab?.currentPage ?? 0
+  const isNative = tab?.engineMode === 'native-pptx'
+  const currentSlide = isNative ? tab?.nativeDeck?.slides[pageIndex] ?? null : null
 
   return (
     <div
@@ -196,18 +322,34 @@ export default function PreviewPage() {
       onDrop={onDrop}
       data-testid="preview-page"
     >
+      <TabBar
+        tabs={tabs}
+        activeTabId={activeTabId}
+        onActivate={(id) => useAppStore.getState().setActiveTab(id)}
+        onClose={(id) => void closeTab(id)}
+        onOpen={() => void pick()}
+      />
+
       <header className="topbar">
         <div className="topbar-title">
           <span className="topbar-name" data-testid="deck-name">
-            {info ? info.sourcePath.split(/[\\/]/).pop() : zh.appName}
+            {tab ? tab.title : zh.appName}
           </span>
-          {info ? (
+          {tab && tab.status === 'ready' ? (
             <>
               <span className="badge" data-testid="deck-format">
-                {info.format.label}
+                {isNative ? 'PPTX' : tab.engineMode === 'pdf' ? 'PDF' : '已转换'}
               </span>
-              {info.format.extMismatch ? <span className="badge badge-warn">实际格式</span> : null}
-              {info.mixedAspect ? <span className="badge badge-warn">{zh.preview.mixedAspect}</span> : null}
+              {tab.hasComplexObjects ? (
+                <span className="badge badge-warn" data-testid="complex-hint" title="含图表或公式，建议切到兼容模式">
+                  复杂元素
+                </span>
+              ) : null}
+              {isNative ? (
+                <span className="badge badge-soft" data-testid="engine-badge">
+                  极速动画
+                </span>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -235,22 +377,27 @@ export default function PreviewPage() {
 
       <div className="preview-body">
         <ThumbRail
-          doc={store.deck.doc}
-          deckId={info?.deckId ?? ''}
-          pageCount={pageCount}
-          currentPage={pageIndex}
+          tab={tab}
           queue={queue}
-          onSelect={(page) => store.setPage(page)}
+          onSelect={(page) => tab && useAppStore.getState().setPage(tab.tabId, page)}
         />
 
         <div className="stage-wrap">
-          {store.deck.doc ? (
-            <SlideStage
-              doc={store.deck.doc}
-              pageIndex={pageIndex}
-              ratio={slideRatio}
-              onDoubleClick={() => void startShow()}
-            />
+          {tab && tab.status === 'ready' ? (
+            isNative && currentSlide ? (
+              <PptxSlideView slide={currentSlide} step={0} showAll onDoubleClick={() => void startShow()} />
+            ) : tab.pdfDoc ? (
+              <SlideStage
+                doc={tab.pdfDoc}
+                pageIndex={pageIndex}
+                ratio={
+                  tab.pageSizes[0] && tab.pageSizes[0].height > 0
+                    ? tab.pageSizes[0].width / tab.pageSizes[0].height
+                    : 16 / 9
+                }
+                onDoubleClick={() => void startShow()}
+              />
+            ) : null
           ) : (
             <div className="stage" data-testid="stage-empty">
               <div className="stage-empty" data-over={dragOver}>
@@ -281,37 +428,38 @@ export default function PreviewPage() {
             </div>
           )}
 
-          {store.loading ? (
+          {tab && tab.status === 'loading' ? (
             <div className="progress-overlay" data-testid="progress-overlay">
               <div className="progress-track">
-                <div className="progress-fill" style={{ width: Math.round(store.loadingRatio * 100) + '%' }} />
+                <div className="progress-fill" style={{ width: Math.round(tab.progressRatio * 100) + '%' }} />
               </div>
-              <span className="progress-text">{store.loadingMessage || zh.preview.converting}</span>
+              <span className="progress-text">{tab.progressMessage || zh.preview.converting}</span>
               <button
                 type="button"
                 className="btn"
                 data-testid="cancel-convert"
-                onClick={() => {
-                  void window.api.cancelOpen()
-                  store.setLoading(false)
-                }}
+                onClick={() => void window.api.cancelOpen()}
               >
                 {zh.common.cancel}
               </button>
             </div>
           ) : null}
 
-          {store.error ? (
+          {tab && tab.status === 'error' && tab.error ? (
             <div className="progress-overlay" data-testid="error-overlay">
               <div className="error-card">
                 <h2>{zh.engine.errorTitle}</h2>
-                <p>{store.error.message}</p>
-                {store.error.detail ? <pre>{store.error.detail}</pre> : null}
+                <p>{tab.error.message}</p>
+                {tab.error.detail ? <pre>{tab.error.detail}</pre> : null}
                 <div className="error-actions">
                   <button type="button" className="btn" onClick={() => void window.api.openLog()}>
                     {zh.engine.openLog}
                   </button>
-                  <button type="button" className="btn" onClick={() => store.setError(null)}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => tab && update(tab.tabId, { status: 'ready', error: null })}
+                  >
                     {zh.common.close}
                   </button>
                 </div>
@@ -326,8 +474,8 @@ export default function PreviewPage() {
           <button
             type="button"
             className="icon-btn"
-            onClick={() => store.setPage(Math.max(0, pageIndex - 1))}
-            disabled={pageIndex <= 0}
+            onClick={() => tab && useAppStore.getState().setPage(tab.tabId, pageIndex - 1)}
+            disabled={!tab || pageIndex <= 0}
             aria-label={zh.playback.prev}
             data-testid="preview-prev"
           >
@@ -339,8 +487,8 @@ export default function PreviewPage() {
           <button
             type="button"
             className="icon-btn"
-            onClick={() => store.setPage(Math.min(pageCount - 1, pageIndex + 1))}
-            disabled={pageIndex >= pageCount - 1}
+            onClick={() => tab && useAppStore.getState().setPage(tab.tabId, pageIndex + 1)}
+            disabled={!tab || pageIndex >= pageCount - 1}
             aria-label={zh.playback.next}
             data-testid="preview-next"
           >
@@ -348,13 +496,39 @@ export default function PreviewPage() {
           </button>
         </div>
 
+        {isNative ? (
+          <div className="bottombar-group">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              data-testid="switch-engine"
+              title="切到 LibreOffice 渲染，保真度更高但不支持动画"
+              onClick={() => void switchEngine('libreoffice')}
+            >
+              兼容模式
+            </button>
+          </div>
+        ) : tab && tab.status === 'ready' ? (
+          <div className="bottombar-group">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              data-testid="switch-engine"
+              title="尝试原生渲染，支持点击动画"
+              onClick={() => void switchEngine('native-pptx')}
+            >
+              极速模式
+            </button>
+          </div>
+        ) : null}
+
         <div className="topbar-spacer" />
 
         <div className="bottombar-group">
           <button
             type="button"
             className="btn"
-            disabled={!info}
+            disabled={!tab || tab.status !== 'ready'}
             onClick={() => void startShow(false)}
             data-testid="start-here"
           >
@@ -362,12 +536,12 @@ export default function PreviewPage() {
           </button>
           <button
             type="button"
-            className="btn btn-primary"
-            disabled={!info}
+            className="btn btn-primary btn-play"
+            disabled={!tab || tab.status !== 'ready'}
             onClick={() => void startShow(true)}
             data-testid="start-show"
           >
-            <Play size={14} />
+            <Play size={15} />
             {zh.preview.startShow}
           </button>
         </div>

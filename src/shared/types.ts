@@ -118,6 +118,26 @@ export type OpenResult =
       error: AppErrorPayload
     }
 
+/** Result of opening a deck with the native PPTX engine. */
+export type NativeOpenResult =
+  | {
+      ok: true
+      deckId: string
+      engineMode: 'native-pptx'
+      slideCount: number
+      /** Slide canvas size in CSS pixels. */
+      slideSize: { width: number; height: number }
+      /** Internal part path per slide, in presentation order. */
+      slidePaths: string[]
+      sourcePath: string
+      sourceBytes: number
+      format: FormatInfo
+    }
+  | {
+      ok: false
+      error: AppErrorPayload
+    }
+
 export interface AppErrorPayload {
   code: AppErrorCode
   message: string

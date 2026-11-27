@@ -5,6 +5,7 @@ import type {
   DeckInfo,
   EngineStatus,
   InkPage,
+  NativeOpenResult,
   OpenResult,
   ProbeResult
 } from './types'
@@ -13,6 +14,7 @@ import type {
 export const IPC = {
   deckProbe: 'deck:probe',
   deckOpen: 'deck:open',
+  deckOpenNative: 'deck:open-native',
   deckCancel: 'deck:cancel',
   deckInfo: 'deck:info',
   deckClose: 'deck:close',
@@ -48,6 +50,8 @@ export interface PlayState {
 export interface RendererApi {
   probe(path: string): Promise<ProbeResult>
   open(path: string): Promise<OpenResult>
+  /** Index a PPTX for the native renderer. Returns null when it needs conversion. */
+  openNative(path: string): Promise<NativeOpenResult | null>
   /** Abort the conversion currently in flight, if any. */
   cancelOpen(): Promise<void>
   deckInfo(deckId: string): Promise<DeckInfo | null>
@@ -82,4 +86,6 @@ export interface RendererApi {
   onExternalOpen(cb: (path: string) => void): () => void
   /** Deck PDF URL for an already-registered deck. */
   deckUrl(deckId: string): string
+  /** Internal PPTX part URL, for the native renderer. */
+  pptxUrl(deckId: string, partPath: string): string
 }

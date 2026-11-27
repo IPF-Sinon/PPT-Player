@@ -15,7 +15,8 @@
     "build": "node scripts/copy-pdfjs-assets.mjs && electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "typecheck:pptx": "tsc --noEmit -p tsconfig.pptx.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web && npm run typecheck:pptx",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -23,7 +24,6 @@
     "package": "npm run build && electron-builder --win nsis zip --x64 --publish never",
     "fixtures": "node scripts/make-fixtures.mjs"
   },
-  "dependencies": {},
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "@playwright/test": "1.65.1",
@@ -38,6 +38,7 @@
     "electron-vite": "6.0.0",
     "eslint": "9.39.5",
     "fflate": "0.8.3",
+    "jsdom": "^31.0.1",
     "pdfjs-dist": "6.5.438",
     "png-to-ico": "3.0.2",
     "pptxgenjs": "4.0.1",

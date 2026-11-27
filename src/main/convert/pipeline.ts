@@ -9,7 +9,8 @@ import { DeckCache, cacheKey } from './cache'
 import { detectFormat } from './detect'
 import { runLibreOffice } from './engine-lo'
 import { bufferSource, fileSource } from './byte-source'
-import type { EngineStatus } from '../../shared/types'
+import { closeNativeDeck, openNativeDeck } from '../pptx/registry'
+import type { EngineStatus, NativeOpenResult } from '../../shared/types'
 
 export interface ConvertContext {
   cacheRoot: string
@@ -94,6 +95,53 @@ export function probeFile(filePath: string): ProbeResult {
 export interface OpenOptions {
   onProgress?: ProgressSink
   signal?: AbortSignal
+}
+
+/** Formats the native engine can render without LibreOffice. */
+const NATIVE_KINDS = new Set(['ooxml-presentation'])
+
+/**
+ * Open a deck with the native PPTX engine.
+ *
+ * Returns null when the file is not a PPTX the native engine can handle, so the
+ * caller can fall back to conversion. This path never invokes soffice: it indexes
+ * the ZIP and returns the slide list, which is what makes opening a deck feel
+ * instant.
+ */
+export function openDeckNative(
+  ctx: ConvertContext,
+  filePath: string,
+  options: OpenOptions = {}
+): NativeOpenResult | null {
+  let probe: ProbeResult
+  try {
+    probe = probeFile(filePath)
+  } catch {
+    return null
+  }
+  if (!NATIVE_KINDS.has(probe.format.kind)) return null
+
+  const deckId = createHash('sha256')
+    .update('native|' + filePath + '|' + probe.bytes + '|' + probe.mtimeMs)
+    .digest('hex')
+    .slice(0, 12)
+
+  const record = openNativeDeck(deckId, filePath)
+  if (!record) return null
+
+  options.onProgress?.({ deckId, stage: 'parse', ratio: 0.6, message: '正在解析幻灯片' })
+
+  return {
+    ok: true,
+    deckId,
+    engineMode: 'native-pptx',
+    slideCount: record.index.slides.length,
+    slideSize: record.index.slideSize,
+    slidePaths: record.index.slides.map((s) => s.path),
+    sourcePath: filePath,
+    sourceBytes: probe.bytes,
+    format: probe.format
+  }
 }
 
 /** Probe, convert (or reuse the cache) and register a deck. */
@@ -305,6 +353,8 @@ export function reportDeckMetrics(
 
 export function closeDeck(deckId: string): void {
   decks.delete(deckId)
+  // Release the ZIP handle too, otherwise Windows keeps the source file locked.
+  closeNativeDeck(deckId)
 }
 
 export function ensureCacheDir(ctx: ConvertContext): string {

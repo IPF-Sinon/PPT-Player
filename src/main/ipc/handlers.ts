@@ -9,6 +9,7 @@ import type {
   DeckInfo,
   EngineStatus,
   InkPage,
+  NativeOpenResult,
   OpenResult,
   ProbeResult
 } from '../../shared/types'
@@ -20,6 +21,7 @@ import {
   getCache,
   getDeck,
   openDeck,
+  openDeckNative,
   probeFile,
   reportDeckMetrics,
   type ConvertContext
@@ -106,6 +108,13 @@ export function registerHandlers(deps: HandlerDeps): void {
       } finally {
         if (activeConversion === controller) activeConversion = null
       }
+    })
+  )
+
+  ipcMain.handle(IPC.deckOpenNative, (_e, rawPath: unknown) =>
+    wrap((): NativeOpenResult | null => {
+      const filePath = pathSchema(rawPath)
+      return openDeckNative(ctx, filePath)
     })
   )
 

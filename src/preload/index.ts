@@ -7,6 +7,7 @@ import type {
   DeckInfo,
   EngineStatus,
   InkPage,
+  NativeOpenResult,
   OpenResult,
   ProbeResult
 } from '../shared/types'
@@ -14,6 +15,8 @@ import type {
 const api: RendererApi = {
   probe: (path: string): Promise<ProbeResult> => ipcRenderer.invoke(IPC.deckProbe, path),
   open: (path: string): Promise<OpenResult> => ipcRenderer.invoke(IPC.deckOpen, path),
+  openNative: (path: string): Promise<NativeOpenResult | null> =>
+    ipcRenderer.invoke(IPC.deckOpenNative, path),
   cancelOpen: (): Promise<void> => ipcRenderer.invoke(IPC.deckCancel),
   deckInfo: (deckId: string): Promise<DeckInfo | null> => ipcRenderer.invoke(IPC.deckInfo, deckId),
   closeDeck: (deckId: string): Promise<void> => ipcRenderer.invoke(IPC.deckClose, deckId),
@@ -52,7 +55,9 @@ const api: RendererApi = {
     ipcRenderer.on(IPC.appOpenExternal, listener)
     return () => ipcRenderer.removeListener(IPC.appOpenExternal, listener)
   },
-  deckUrl: (deckId: string): string => 'app://deck/' + deckId + '/deck.pdf'
+  deckUrl: (deckId: string): string => 'app://deck/' + deckId + '/deck.pdf',
+  pptxUrl: (deckId: string, partPath: string): string =>
+    'app://pptx/' + deckId + '/' + partPath.replace(/^\/+/, '')
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -35,5 +35,9 @@
     "src/shared/**/*",
     "tests/unit/**/*",
     "tests/e2e/**/*"
+  ],
+  "exclude": [
+    "tests/unit/pptx-animations.test.ts",
+    "tests/unit/pptx-parse.test.ts"
   ]
 }

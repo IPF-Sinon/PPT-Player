@@ -4,11 +4,13 @@ import { extname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { log } from '../log'
 import { pdfPathOf } from '../convert/pipeline'
+import { readNativePart } from '../pptx/registry'
 import { isInside } from './protocol-path'
 
 export const APP_SCHEME = 'app'
 export const RENDERER_HOST = 'renderer'
 export const DECK_HOST = 'deck'
+export const PPTX_HOST = 'pptx'
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -28,7 +30,16 @@ const MIME: Record<string, string> = {
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
   '.bcmap': 'application/octet-stream',
-  '.pfb': 'application/octet-stream'
+  '.pfb': 'application/octet-stream',
+  '.xml': 'application/xml; charset=utf-8',
+  '.rels': 'application/xml; charset=utf-8',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.emf': 'image/emf',
+  '.wmf': 'image/wmf',
+  '.mp4': 'video/mp4',
+  '.m4a': 'audio/mp4',
+  '.wav': 'audio/wav'
 }
 
 /** Must be called before app ready. */
@@ -143,6 +154,26 @@ export function registerAppProtocol(roots: ProtocolRoots): void {
         const pdfPath = pdfPathOf(deckId)
         if (!pdfPath) return notFound()
         return streamFile(pdfPath, request)
+      }
+
+      // Native PPTX parts are served straight out of the archive, so the renderer
+      // can use ordinary <img> and fetch() against internal OOXML paths.
+      if (host === PPTX_HOST) {
+        const segments = rel.split('/')
+        const deckId = segments[0] ?? ''
+        const partPath = segments.slice(1).join('/')
+        if (!/^[0-9a-f]{12}$/.test(deckId) || partPath === '') return notFound()
+        const data = readNativePart(deckId, partPath)
+        if (!data) return notFound()
+        const type = MIME[extname(partPath).toLowerCase()] ?? 'application/octet-stream'
+        return new Response(new Uint8Array(data), {
+          status: 200,
+          headers: {
+            'content-type': type,
+            'content-length': String(data.length),
+            'cache-control': 'no-cache'
+          }
+        })
       }
 
       if (host === RENDERER_HOST) {
