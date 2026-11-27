@@ -25,6 +25,11 @@ win:
     - target: zip
       arch: [x64]
   icon: resources/icon.ico
+  # Electron ships ~50 locale packs; this app is Chinese-only, so keeping just
+  # zh-CN and en removes tens of megabytes of Chromium resources nothing loads.
+  electronLanguages:
+    - zh-CN
+    - en-US
   artifactName: PPTPlayer-${version}-x64-lite.${ext}
   executableName: PPTPlayer
   fileAssociations:
