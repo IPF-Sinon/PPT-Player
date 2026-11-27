@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { strToU8, zipSync } from 'fflate'
 import { openDeck, probeFile, reportDeckMetrics, type ConvertContext } from '../../src/main/convert/pipeline'
 import { AppError } from '../../src/shared/errors'
 import type { EngineStatus } from '../../src/shared/types'
+
+const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
 
 const noEngine: EngineStatus = {
   available: false,
@@ -18,15 +19,15 @@ const noEngine: EngineStatus = {
 
 function ctxWith(engine: EngineStatus): ConvertContext {
   return {
-    cacheRoot: mkdtempSync(join(tmpdir(), 'ppt-cache-')),
-    profileRoot: mkdtempSync(join(tmpdir(), 'ppt-lo-')),
+    cacheRoot: mkdtempSync(join(scratchRoot, 'ppt-cache-')),
+    profileRoot: mkdtempSync(join(scratchRoot, 'ppt-lo-')),
     appVersion: '0.1.0',
     engine: () => engine
   }
 }
 
 function tmpDeck(name: string, content: Buffer): string {
-  const dir = mkdtempSync(join(tmpdir(), 'ppt-player-test-'))
+  const dir = mkdtempSync(join(scratchRoot, 'ppt-player-test-'))
   const file = join(dir, name)
   writeFileSync(file, content)
   return file
@@ -57,7 +58,7 @@ describe('probeFile', () => {
   })
 
   it('rejects a missing file', () => {
-    expect(() => probeFile(join(tmpdir(), 'definitely-missing-xyz.pptx'))).toThrow(
+    expect(() => probeFile(join(scratchRoot, 'definitely-missing-xyz.pptx'))).toThrow(
       expect.objectContaining({ code: 'ENOENT' }) as never
     )
   })
@@ -131,8 +132,8 @@ describe('openDeck', () => {
     const file = tmpDeck('notify.pdf', pdfBytes)
     const seen: string[] = []
     const ctx: ConvertContext = {
-      cacheRoot: mkdtempSync(join(tmpdir(), 'ppt-cache-')),
-    profileRoot: mkdtempSync(join(tmpdir(), 'ppt-lo-')),
+      cacheRoot: mkdtempSync(join(scratchRoot, 'ppt-cache-')),
+    profileRoot: mkdtempSync(join(scratchRoot, 'ppt-lo-')),
       appVersion: '0.1.0',
       engine: () => noEngine,
       onOpened: (path) => seen.push(path)
@@ -142,7 +143,7 @@ describe('openDeck', () => {
   })
 
   it('returns an error payload for a missing file', async () => {
-    const result = await openDeck(ctxWith(noEngine), join(tmpdir(), 'nope-missing.pptx'))
+    const result = await openDeck(ctxWith(noEngine), join(scratchRoot, 'nope-missing.pptx'))
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('ENOENT')
   })

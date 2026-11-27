@@ -12,6 +12,13 @@ interface PptxSlideViewProps {
   showAll?: boolean
   /** Fit the slide into the parent box by scaling it. */
   fit?: boolean
+  /**
+   * Explicit scale, bypassing measurement.
+   *
+   * A thumbnail knows its own width, so measuring would only add a layout round
+   * trip and risk a zero-size first pass that renders blank.
+   */
+  fixedScale?: number
   /** How many steps of each trigger track have run. */
   triggerProgress?: Record<string, number>
   /** Called when the audience clicks a trigger button. */
@@ -34,6 +41,7 @@ export function PptxSlideView({
   step,
   showAll = false,
   fit = false,
+  fixedScale,
   triggerProgress,
   onTrigger,
   inkActive = false,
@@ -74,6 +82,10 @@ export function PptxSlideView({
   // holder (not the slide) keeps this a one-way dependency, so it cannot feed back
   // into its own layout the way an earlier version did.
   useLayoutEffect(() => {
+    if (fixedScale !== undefined) {
+      setScale(fixedScale)
+      return
+    }
     if (!fit) {
       setScale(1)
       return
@@ -90,7 +102,7 @@ export function PptxSlideView({
     const observer = new ResizeObserver(measure)
     observer.observe(holder)
     return () => observer.disconnect()
-  }, [fit, slide.size.width, slide.size.height])
+  }, [fit, fixedScale, slide.size.width, slide.size.height])
 
   // Play the effects belonging to the step just reached, then clear them so a
   // re-render does not replay an animation the audience already saw.

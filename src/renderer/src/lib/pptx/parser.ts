@@ -41,6 +41,13 @@ import {
 import { parseTextBody } from './text'
 import { parseAnimations, parseTriggers } from './animations'
 import { parseTransition } from './transition'
+import {
+  collectPlaceholders,
+  inheritPlaceholder,
+  inheritPlaceholderText,
+  placeholderKeyOf,
+  type PlaceholderShape
+} from './placeholder'
 import { parseRelationships, relsPartFor, resolvePartTarget } from './rels'
 
 export interface SlideLoadContext {
@@ -296,6 +303,17 @@ async function parseElementList(
   return out
 }
 
+/** Find the placeholder key of the shape with the given id, if it is one. */
+function findPlaceholderKey(spTree: Element | null, id: string) {
+  if (!spTree) return null
+  for (const sp of descendants(spTree, 'sp')) {
+    const nv = first(sp, 'cNvPr')
+    if (attr(nv, 'id') !== id) continue
+    return placeholderKeyOf(sp)
+  }
+  return null
+}
+
 /**
  * Parse one slide part into a renderable model.
  *
@@ -327,21 +345,54 @@ export async function parseSlide(
     background = bgPr ? blipFill(bgPr, ctx, slidePath, rels) : undefined
   }
 
+  // Walk slide -> layout -> master once, collecting both the inherited background
+  // and the placeholder definitions each level provides.
   let layoutName: string | undefined
-  if (!background) {
-    const layoutRel = Array.from(rels.values()).find((rel) => rel.type.endsWith('/slideLayout'))
-    if (layoutRel) {
-      const layoutPath = resolvePartTarget(slidePath, layoutRel.target)
-      const layoutXml = await ctx.readText(layoutPath)
-      if (layoutXml) {
-        const layoutDoc = parseXml(layoutXml)
-        if (layoutDoc) {
-          layoutName = attr(first(layoutDoc.documentElement, 'cSld'), 'name') ?? undefined
-          const layoutCtx = first(first(layoutDoc.documentElement, 'cSld') ?? layoutDoc.documentElement, 'bg')
-          const layoutBgPr = layoutCtx ? first(layoutCtx, 'bgPr') : null
+  const placeholderChain: PlaceholderShape[][] = []
+
+  const layoutRel = Array.from(rels.values()).find((rel) => rel.type.endsWith('/slideLayout'))
+  if (layoutRel) {
+    const layoutPath = resolvePartTarget(slidePath, layoutRel.target)
+    const layoutXml = await ctx.readText(layoutPath)
+    if (layoutXml) {
+      const layoutDoc = parseXml(layoutXml)
+      if (layoutDoc) {
+        const layoutRoot = layoutDoc.documentElement
+        const layoutCld = first(layoutRoot, 'cSld')
+        layoutName = attr(layoutCld, 'name') ?? undefined
+        placeholderChain.push(collectPlaceholders(layoutCld ? first(layoutCld, 'spTree') : null, ctx.theme))
+
+        if (!background) {
+          const layoutBg = layoutCld ? first(layoutCld, 'bg') : null
+          const layoutBgPr = layoutBg ? first(layoutBg, 'bgPr') : null
           if (layoutBgPr) {
             const layoutRels = await loadRels(ctx, layoutPath)
             background = blipFill(layoutBgPr, ctx, layoutPath, layoutRels)
+          }
+        }
+
+        // The master sits one level further up.
+        const layoutRels = await loadRels(ctx, layoutPath)
+        const masterRel = Array.from(layoutRels.values()).find((rel) => rel.type.endsWith('/slideMaster'))
+        if (masterRel) {
+          const masterPath = resolvePartTarget(layoutPath, masterRel.target)
+          const masterXml = await ctx.readText(masterPath)
+          if (masterXml) {
+            const masterDoc = parseXml(masterXml)
+            if (masterDoc) {
+              const masterCld = first(masterDoc.documentElement, 'cSld')
+              placeholderChain.push(
+                collectPlaceholders(masterCld ? first(masterCld, 'spTree') : null, ctx.theme)
+              )
+              if (!background) {
+                const masterBg = masterCld ? first(masterCld, 'bg') : null
+                const masterBgPr = masterBg ? first(masterBg, 'bgPr') : null
+                if (masterBgPr) {
+                  const masterRels = await loadRels(ctx, masterPath)
+                  background = blipFill(masterBgPr, ctx, masterPath, masterRels)
+                }
+              }
+            }
           }
         }
       }
@@ -350,9 +401,36 @@ export async function parseSlide(
 
   const elements = spTree ? await parseElementList(spTree, ctx, slidePath, rels) : []
 
-  const complex =
+  // Fill in geometry for placeholders that did not declare their own box. A cover
+  // slide usually only says "this is the title", so without this the title lands at
+  // 0,0 with no size and the slide looks blank.
+  for (const element of elements) {
+    if (element.type !== 'shape') continue
+    if (element.rect.width > 0 && element.rect.height > 0) continue
+    const key = findPlaceholderKey(spTree, element.id)
+    if (!key) continue
+    const inherited = inheritPlaceholder(key, placeholderChain)
+    if (!inherited) continue
+    element.rect = inherited.rect
+    if (inherited.rotation !== undefined) element.rotation = inherited.rotation
+    if (!element.text) {
+      const text = inheritPlaceholderText(key, placeholderChain)
+      if (text) element.text = text
+    }
+  }
+
+  let complex =
     (spTree ? descendants(spTree, 'graphicFrame').some(hasComplexContent) : false) ||
     (spTree ? descendants(spTree, 'oleObj').length > 0 : false)
+
+  // A slide whose XML has shapes but which renders nothing means the content is
+  // something the native engine cannot draw (SmartArt, OLE, EMF). Flag it so the UI
+  // can offer compatible mode instead of silently showing a blank page.
+  const visibleElements = elements.filter((el) => el.rect.width > 0 && el.rect.height > 0)
+  const rawShapeCount = spTree ? descendants(spTree, 'sp').length : 0
+  if (!complex && rawShapeCount > 0 && visibleElements.length === 0) {
+    complex = true
+  }
 
   const timing = first(root, 'timing')
   // Motion path coordinates are normalised to the slide box, so the parser needs

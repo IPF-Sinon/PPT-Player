@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { afterAll } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
 import { bufferSource, fileSource } from '../../src/main/convert/byte-source'
@@ -135,6 +134,6 @@ describe('countPdfPages', () => {
   })
 
   it('returns zero for an unreadable file', () => {
-    expect(countPdfPages(join(tmpdir(), 'missing-xyz.pdf'))).toBe(0)
+    expect(countPdfPages(join(scratchRoot, 'missing-xyz.pdf'))).toBe(0)
   })
 })

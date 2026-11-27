@@ -9,7 +9,7 @@ import { ThumbRail } from '../components/ThumbRail'
 import { SlideStage } from '../components/SlideStage'
 import { PptxSlideView } from '../components/PptxSlideView'
 import { TabBar } from '../components/TabBar'
-import { ChevronDown, ChevronUp, Close, Folder, Play, Settings } from '../components/icons'
+import { ChevronDown, ChevronUp, Folder, Play } from '../components/icons'
 import { SettingsSheet } from '../components/Sheets'
 import { EngineDownloadModal } from '../components/EngineDownloadModal'
 import '../styles/preview.css'
@@ -346,52 +346,8 @@ export default function PreviewPage() {
         onActivate={(id) => useAppStore.getState().setActiveTab(id)}
         onClose={(id) => void closeTab(id)}
         onOpen={() => void pick()}
+        onSettings={() => setSettingsOpen(true)}
       />
-
-      <header className="topbar">
-        <div className="topbar-title">
-          <span className="topbar-name" data-testid="deck-name">
-            {tab ? tab.title : zh.appName}
-          </span>
-          {tab && tab.status === 'ready' ? (
-            <>
-              <span className="badge" data-testid="deck-format">
-                {isNative ? 'PPTX' : tab.engineMode === 'pdf' ? 'PDF' : '已转换'}
-              </span>
-              {tab.hasComplexObjects ? (
-                <span className="badge badge-warn" data-testid="complex-hint" title="含图表或公式，建议切到兼容模式">
-                  复杂元素
-                </span>
-              ) : null}
-              {isNative ? (
-                <span className="badge badge-soft" data-testid="engine-badge">
-                  极速动画
-                </span>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-        <div className="topbar-spacer" />
-        <button
-          type="button"
-          className="icon-btn"
-          title={zh.common.settings}
-          aria-label={zh.common.settings}
-          data-testid="open-settings"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <Settings size={17} />
-        </button>
-        <button
-          type="button"
-          className="icon-btn"
-          title={zh.common.close}
-          aria-label={zh.common.close}
-          onClick={() => window.close()}
-        >
-          <Close size={17} />
-        </button>
-      </header>
 
       <div className="preview-body">
         <ThumbRail
@@ -519,6 +475,24 @@ export default function PreviewPage() {
             <ChevronDown size={16} />
           </button>
         </div>
+
+        {tab && tab.status === 'ready' ? (
+          <div className="bottombar-group">
+            <span className="badge" data-testid="deck-format">
+              {isNative ? 'PPTX' : tab.engineMode === 'pdf' ? 'PDF' : '已转换'}
+            </span>
+            {isNative ? (
+              <span className="badge badge-soft" data-testid="engine-badge">
+                极速动画
+              </span>
+            ) : null}
+            {tab.hasComplexObjects ? (
+              <span className="badge badge-warn" data-testid="complex-hint" title="含图表或公式，建议切到兼容模式">
+                复杂元素
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         {isNative ? (
           <div className="bottombar-group">

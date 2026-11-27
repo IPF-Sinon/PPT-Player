@@ -3,43 +3,20 @@
 }
 
 .preview {
-  display: grid;
-  grid-template-rows: var(--topbar-h) 1fr var(--bottombar-h);
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-app);
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 14px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--line);
-  -webkit-app-region: drag;
-}
+/* The layout is a flex column on purpose. A fixed-row grid silently misassigns
+   rows when a child is added: the tab bar took row 1, the topbar was stretched
+   over 1fr, the slide body was squeezed into the 64px footer row and the footer
+   itself was pushed off screen. A flex column cannot miscount its children. */
 
-.topbar > * {
-  -webkit-app-region: no-drag;
-}
 
-.topbar-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-}
-
-.topbar-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 520px;
-}
 
 .topbar-spacer {
   flex: 1;
@@ -70,15 +47,21 @@
 }
 
 .preview-body {
-  display: grid;
-  grid-template-columns: var(--rail-w) 1fr auto;
+  display: flex;
+  flex: 1;
+  /* min-height: 0 is what lets this row shrink instead of pushing the footer out. */
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .rail {
+  width: var(--rail-w);
+  flex-shrink: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 14px 12px 24px;
-  background: var(--bg-panel);
+  background: #f8f9fb;
   border-right: 1px solid var(--line);
 }
 
@@ -224,6 +207,8 @@
   display: flex;
   align-items: center;
   gap: 16px;
+  height: var(--bottombar-h);
+  flex-shrink: 0;
   padding: 0 16px;
   background: var(--bg-panel);
   border-top: 1px solid var(--line);
@@ -381,15 +366,20 @@
 /* ------------------------------------------------------------------- tab bar */
 /* A single scrollable row keeps the action buttons anchored no matter how many
    decks are open. */
-.tabbar {
+.topbar {
   display: flex;
-  align-items: stretch;
-  gap: 6px;
-  height: 38px;
-  padding: 0 8px;
+  align-items: center;
+  gap: 10px;
+  height: var(--topbar-h);
+  flex-shrink: 0;
+  padding: 0 10px;
   background: var(--bg-chrome);
   border-bottom: 1px solid var(--line);
-  flex: none;
+  -webkit-app-region: drag;
+}
+
+.topbar > * {
+  -webkit-app-region: no-drag;
 }
 
 .tabbar-scroll {
@@ -403,11 +393,20 @@
   min-width: 0;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 .tab {
   display: flex;
   align-items: center;
   gap: 6px;
   height: 28px;
+  max-width: 200px;
+  flex-shrink: 0;
   padding: 0 6px 0 9px;
   border-radius: 7px;
   border: 1px solid transparent;
@@ -433,9 +432,11 @@
 }
 
 .tab-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 150px;
+  white-space: nowrap;
+  max-width: 140px;
 }
 
 .tab-dot {
@@ -502,9 +503,10 @@
 .tab-new {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  margin: 6px 0;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  margin: 0 2px;
   border: 1px dashed var(--line-strong);
   border-radius: 6px;
   background: transparent;

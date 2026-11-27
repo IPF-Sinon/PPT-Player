@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import {
   buildConvertArgs,
   collectPdf,
@@ -10,8 +9,10 @@ import {
   toFileUrl
 } from '../../src/main/convert/engine-lo'
 
+const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
+
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), 'lo-out-'))
+  return mkdtempSync(join(scratchRoot, 'lo-out-'))
 }
 
 describe('collectPdf', () => {
@@ -46,7 +47,7 @@ describe('collectPdf', () => {
   })
 
   it('returns an empty string for a missing directory', () => {
-    expect(collectPdf(join(tmpdir(), 'no-such-dir-xyz'))).toBe('')
+    expect(collectPdf(join(scratchRoot, 'no-such-dir-xyz'))).toBe('')
   })
 })
 

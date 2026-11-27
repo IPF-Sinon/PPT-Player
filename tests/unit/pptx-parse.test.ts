@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import PptxGenJS from 'pptxgenjs'
 import { openZipVfs, normaliseEntry, type ZipVfs } from '../../src/main/pptx/zip-vfs'
 import { buildPresentationIndex, relsPartFor, resolvePartTarget } from '../../src/main/pptx/index-parse'
 import { loadTheme, parseSlide } from '../../src/renderer/src/lib/pptx/parser'
+
+const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
 
 /**
  * These run against a deck produced by a real writer, not against hand-written XML.
@@ -18,7 +19,9 @@ let fixture = ''
 let vfs: ZipVfs
 
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'pptx-native-'))
+  // The scratch root may not exist yet on a clean checkout.
+  mkdirSync(scratchRoot, { recursive: true })
+  dir = mkdtempSync(join(scratchRoot, 'pptx-native-'))
   fixture = join(dir, 'deck.pptx')
 
   const pptx = new PptxGenJS()

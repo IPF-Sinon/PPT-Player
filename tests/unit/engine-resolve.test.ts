@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { resolveLibreOffice } from '../../src/main/convert/engine-resolve'
 
+const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
+
 function fakeEngineRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'lo-root-'))
+  const root = mkdtempSync(join(scratchRoot, 'lo-root-'))
   const program = join(root, 'program')
   mkdirSync(program, { recursive: true })
   writeFileSync(join(program, 'soffice.com'), '')
@@ -22,7 +23,7 @@ describe('resolveLibreOffice', () => {
   })
 
   it('finds a versioned sub-directory inside the engine root', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'lo-root-'))
+    const root = mkdtempSync(join(scratchRoot, 'lo-root-'))
     const program = join(root, 'LibreOffice', 'program')
     mkdirSync(program, { recursive: true })
     writeFileSync(join(program, 'soffice.com'), '')
@@ -46,7 +47,7 @@ describe('resolveLibreOffice', () => {
   it('ignores an unusable override', async () => {
     const root = fakeEngineRoot()
     const status = await resolveLibreOffice({
-      loPathOverride: join(tmpdir(), 'nope-does-not-exist'),
+      loPathOverride: join(scratchRoot, 'nope-does-not-exist'),
       bundledRoots: [root],
       platform: 'win32',
       pathVar: ''

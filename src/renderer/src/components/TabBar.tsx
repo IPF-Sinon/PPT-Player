@@ -1,4 +1,5 @@
 import type { TabItem } from '../lib/tabs'
+import { Folder, Settings } from './icons'
 
 interface TabBarProps {
   tabs: TabItem[]
@@ -6,6 +7,7 @@ interface TabBarProps {
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
   onOpen: () => void
+  onSettings: () => void
 }
 
 /** Status dot on a tab: converting, partial, ready or failed. */
@@ -17,16 +19,15 @@ function statusOf(tab: TabItem): 'loading' | 'partial' | 'ready' | 'error' {
 }
 
 /**
- * Compact tab strip.
+ * The single top strip: tabs on the left, actions on the right.
  *
- * Scrolls horizontally rather than wrapping, so a dozen open decks still leave the
- * action buttons at a stable position.
+ * This replaces a separate tab bar plus a separate title bar. The file name used to
+ * appear three times (window title, tab, header), and the header carried a close
+ * button duplicating the one Windows already draws, so the row is now one layer.
  */
-export function TabBar({ tabs, activeTabId, onActivate, onClose, onOpen }: TabBarProps) {
-  if (tabs.length === 0) return null
-
+export function TabBar({ tabs, activeTabId, onActivate, onClose, onOpen, onSettings }: TabBarProps) {
   return (
-    <div className="tabbar" data-testid="tabbar">
+    <div className="topbar" data-testid="tabbar">
       <div className="tabbar-scroll">
         {tabs.map((tab) => (
           <div
@@ -44,7 +45,9 @@ export function TabBar({ tabs, activeTabId, onActivate, onClose, onOpen }: TabBa
             }}
           >
             <span className="tab-dot" data-state={statusOf(tab)} aria-hidden="true" />
-            <span className="tab-title">{tab.title}</span>
+            <span className="tab-title" data-testid="deck-name">
+              {tab.title}
+            </span>
             {tab.engineMode === 'native-pptx' ? (
               <span className="tab-badge" title="原生渲染，支持动画">
                 动画
@@ -64,10 +67,33 @@ export function TabBar({ tabs, activeTabId, onActivate, onClose, onOpen }: TabBa
             </button>
           </div>
         ))}
+        <button type="button" className="tab-new" aria-label="打开文件" data-testid="tab-new" onClick={onOpen}>
+          +
+        </button>
       </div>
-      <button type="button" className="tab-new" aria-label="打开文件" data-testid="tab-new" onClick={onOpen}>
-        +
-      </button>
+
+      <div className="topbar-actions">
+        <button
+          type="button"
+          className="icon-btn"
+          title="打开文件"
+          aria-label="打开文件"
+          data-testid="open-file"
+          onClick={onOpen}
+        >
+          <Folder size={17} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          title="设置"
+          aria-label="设置"
+          data-testid="open-settings"
+          onClick={onSettings}
+        >
+          <Settings size={17} />
+        </button>
+      </div>
     </div>
   )
 }

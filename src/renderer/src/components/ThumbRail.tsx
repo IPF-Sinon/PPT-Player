@@ -120,8 +120,22 @@ function NativeThumb({ deckId, slide, pageNumber, active, onSelect }: NativeThum
       aria-current={active ? 'true' : undefined}
     >
       <span className="rail-index">{pageNumber}</span>
-      <div className="rail-native" style={{ width: THUMB_WIDTH, height: slide ? (THUMB_WIDTH * slide.size.height) / slide.size.width : 112 }} data-deck={deckId}>
-        {slide ? <PptxSlideView slide={slide} step={0} showAll fit /> : null}
+      <div
+        className="rail-native"
+        style={{
+          width: THUMB_WIDTH,
+          height: slide ? (THUMB_WIDTH * slide.size.height) / slide.size.width : 112
+        }}
+        data-deck={deckId}
+      >
+        {slide ? (
+          <PptxSlideView
+            slide={slide}
+            step={0}
+            showAll
+            fixedScale={THUMB_WIDTH / slide.size.width}
+          />
+        ) : null}
       </div>
     </button>
   )

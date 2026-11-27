@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { DeckCache, cacheKey } from '../../src/main/convert/cache'
 
+const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
+
 function tempRoot(): string {
-  return mkdtempSync(join(tmpdir(), 'ppt-cache-test-'))
+  return mkdtempSync(join(scratchRoot, 'ppt-cache-test-'))
 }
 
 const base = {

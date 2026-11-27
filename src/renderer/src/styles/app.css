@@ -57,6 +57,9 @@ button:disabled {
   color: var(--text-strong);
   font-size: 13px;
   white-space: nowrap;
+  /* Buttons sit in flex rows beside a growing title; without this they shrink and
+     the label wraps mid-word. */
+  flex-shrink: 0;
 }
 
 .btn:hover:not(:disabled) {
@@ -90,6 +93,9 @@ button:disabled {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
+  /* A badge is a fixed chip: it must never shrink or wrap to a second line. */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .badge-warn {
