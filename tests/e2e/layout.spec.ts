@@ -51,7 +51,7 @@ async function measure(selector: string): Promise<{
         : null,
       viewport: { width: g.innerWidth, height: g.innerHeight }
     }
-  }, testId)
+  }, selector)
 }
 
 test('1. the work area fills most of the window', async () => {
