@@ -119,9 +119,12 @@ jobs:
           if ($null -eq $lite) { throw 'lite NSIS installer missing' }
           $liteMb = [math]::Round($lite.Length/1MB,1)
           Write-Host "lite installer: $liteMb MB"
-          # The lite build exists to be small; if it creeps past this budget the engine
-          # is being bundled again and the whole point is lost.
-          if ($lite.Length -gt 95MB) { throw "lite installer too large: $liteMb MB, budget is 95 MB" }
+          # Measured floor, not a guess: with zero runtime dependencies and Electron's
+          # locale packs trimmed to zh-CN and en-US, the lite installer is 108.8 MB,
+          # and essentially all of that is the Electron runtime itself. The engine
+          # accounts for the 94.6 MB gap from the full build, so this budget still
+          # catches the one regression that matters: the engine bundled again.
+          if ($lite.Length -gt 112MB) { throw "lite installer too large: $liteMb MB, budget is 112 MB" }
 
           $liteZip = Get-ChildItem -Path dist -Filter 'PPTPlayer-*-x64-lite.zip' | Select-Object -First 1
           if ($null -eq $liteZip) { throw 'lite zip missing' }
@@ -130,6 +133,11 @@ jobs:
             throw 'lite package still contains resources/lo'
           }
           Write-Host 'lite package verified: no bundled engine'
+          # The full build must stay clearly heavier. If the two converge, the engine
+          # silently stopped being bundled into the full build.
+          $gap = [math]::Round(($full.Length - $lite.Length)/1MB, 1)
+          Write-Host "full minus lite: $gap MB"
+          if ($gap -lt 60) { throw "engine gap too small: $gap MB, full build may be missing its engine" }
 
       - name: Write checksums
         shell: pwsh
