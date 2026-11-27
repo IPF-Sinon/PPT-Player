@@ -49,7 +49,8 @@ jobs:
       - name: Install Tauri CLI
         uses: taiki-e/install-action@v2
         with:
-          tool: tauri-cli@^2
+          # The action rejects semver ranges, so the version is pinned.
+          tool: tauri-cli@2.12.7
 
       - name: Stage a PDF for the range probe
         shell: pwsh
