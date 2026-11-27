@@ -15,6 +15,8 @@ crate-type = ["rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+# No extra features: tauri-build rejects a Cargo feature that the config does not
+# declare, and the spike serves its own protocol rather than using the asset one.
+tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
