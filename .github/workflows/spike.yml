@@ -43,14 +43,19 @@ jobs:
           key: spike-cargo-${{ hashFiles('spike/src-tauri/Cargo.toml', 'spike/src-tauri/build.rs') }}
           restore-keys: spike-cargo-
 
-      # A prebuilt CLI instead of `cargo install tauri-cli`: building the CLI from
-      # source took over twelve minutes on every run and has nothing to do with what
-      # is being measured.
+      # The prebuilt-binary action fails on this image (cargo-binstall cannot start
+      # bash), so the CLI is built from source and then cached: the expensive part is
+      # paid once rather than on every run.
       - name: Install Tauri CLI
-        uses: taiki-e/install-action@v2
-        with:
-          # The action rejects semver ranges, so the version is pinned.
-          tool: tauri-cli@2.12.7
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:USERPROFILE\.cargo\bin\cargo-tauri.exe") {
+            Write-Host "tauri-cli already cached"
+          } else {
+            cargo install tauri-cli --version "^2" --locked
+            if ($LASTEXITCODE -ne 0) { throw "tauri-cli install failed" }
+          }
+          cargo tauri --version
 
       - name: Stage a PDF for the range probe
         shell: pwsh
