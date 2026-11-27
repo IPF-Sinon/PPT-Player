@@ -313,3 +313,27 @@ test('13. leaving playback returns to preview in the same window', async () => {
 test('14. the window title carries the file name', async () => {
   expect(await win.title()).toContain(deckName)
 })
+test('15. Escape leaves the show even after drawing', async () => {
+  // The exit dialog asks about annotations, but it must never trap the presenter:
+  // Escape and the window leaving fullscreen bypass it entirely.
+  await win.getByTestId('start-show').click()
+  await expect(win.getByTestId('playback-page')).toBeVisible({ timeout: 30_000 })
+  await expect.poll(isFullScreen, { timeout: 30_000 }).toBe(true)
+
+  // Draw something so the session counts as annotated.
+  await win.mouse.move(400, 300)
+  await win.getByTestId('tool-pen').click()
+  const frame = win.getByTestId('slide-frame')
+  const box = await frame.boundingBox()
+  expect(box).not.toBeNull()
+  await win.mouse.move(box!.x + box!.width * 0.3, box!.y + box!.height * 0.4)
+  await win.mouse.down()
+  await win.mouse.move(box!.x + box!.width * 0.5, box!.y + box!.height * 0.5, { steps: 5 })
+  await win.mouse.up()
+
+  await win.keyboard.press('Escape')
+  // No dialog, no delay: the window is out of fullscreen and back to the preview.
+  await expect(win.getByTestId('exit-ink-dialog')).toBeHidden()
+  await expect.poll(isFullScreen, { timeout: 15_000 }).toBe(false)
+  await expect(win.getByTestId('preview-page')).toBeVisible({ timeout: 15_000 })
+})

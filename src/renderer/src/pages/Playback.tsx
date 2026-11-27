@@ -193,7 +193,8 @@ export default function PlaybackPage() {
             setBoardOpen(false)
             return
           }
-          state.exitShow()
+          // Escape leaves straight away; only the explicit end button asks.
+          state.exitNow()
           return
         case 'd':
         case 'D':
@@ -357,6 +358,18 @@ export default function PlaybackPage() {
    * The question only appears if this session actually changed the ink: asking every
    * time would be noise for a show where nothing was drawn.
    */
+  /**
+   * Leave immediately, without asking.
+   *
+   * Used for Escape and for the window losing fullscreen: those are the presenter
+   * leaving in a hurry, and a modal that traps them in the show is worse than
+   * applying the default.
+   */
+  const exitNow = useCallback((): void => {
+    if (inkDirty && inkOnExit === 'discard') persistInk(inkAtEntry.current)
+    leaveNow()
+  }, [inkDirty, inkOnExit, persistInk, leaveNow])
+
   const exitShow = useCallback((): void => {
     if (!inkDirty || inkOnExit === 'keep') {
       leaveNow()
@@ -402,14 +415,15 @@ export default function PlaybackPage() {
     }
   }, [])
 
-  const stateRef = useRef({ next, prev, boardOpen, exitShow, tab })
-  stateRef.current = { next, prev, boardOpen, exitShow, tab }
+  const stateRef = useRef({ next, prev, boardOpen, exitShow, exitNow, tab })
+  stateRef.current = { next, prev, boardOpen, exitShow, exitNow, tab }
 
   useEffect(() => {
     return platform().onPlayState((state) => {
-      if (!state.active) exitShow()
+      // The window already left fullscreen, so there is nothing left to ask about.
+      if (!state.active) exitNow()
     })
-  }, [exitShow])
+  }, [exitNow])
 
   const onStageClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
     if (tool !== 'pointer' || boardOpen) return
