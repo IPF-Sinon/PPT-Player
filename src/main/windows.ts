@@ -74,15 +74,20 @@ export function createMainWindow(): BrowserWindow {
     height: 820,
     minWidth: 960,
     minHeight: 640,
-    show: false,
-    backgroundColor: '#0f1115',
+    // Shown immediately, with the paint deferred. Waiting for ready-to-show made the
+    // app feel slow to start: double-clicking produced no window at all until the
+    // renderer had parsed and painted, which on a cold start is a visible pause.
+    show: true,
+    paintWhenInitiallyHidden: false,
+    // Matches --bg-app, so there is no dark flash before the UI paints. This used to
+    // be #0f1115 while the app is light.
+    backgroundColor: '#f3f4f6',
     title: 'PPT 放映器',
     autoHideMenuBar: true,
     webPreferences: baseWebPreferences
   })
 
   hardenWebContents(win)
-  win.once('ready-to-show', () => win.show())
 
   // Leaving fullscreen by any route (Escape, F11, OS gesture) must put the UI back
   // into preview, otherwise the chrome stays hidden over a normal window.
