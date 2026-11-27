@@ -81,7 +81,7 @@ export function reportMetricsSchema(raw: unknown): ReportMetricsInput {
   }
 }
 
-const SETTINGS_KEYS = new Set(['loPathOverride', 'cacheBudgetMb', 'recentFiles'])
+const SETTINGS_KEYS = new Set(['loPathOverride', 'cacheBudgetMb', 'recentFiles', 'enableTransitions'])
 
 export function settingsPatchSchema(raw: unknown): Partial<AppSettings> {
   if (typeof raw !== 'object' || raw === null) fail('settings', 'must be an object')
@@ -109,6 +109,12 @@ export function settingsPatchSchema(raw: unknown): Partial<AppSettings> {
       fail('recentFiles', 'must be an array of at most 20 paths')
     }
     patch.recentFiles = value.recentFiles.map((entry, index) => pathSchema(entry) || String(index))
+  }
+  if (value.enableTransitions !== undefined) {
+    if (typeof value.enableTransitions !== 'boolean') {
+      fail('enableTransitions', 'must be a boolean')
+    }
+    patch.enableTransitions = value.enableTransitions
   }
   return patch
 }

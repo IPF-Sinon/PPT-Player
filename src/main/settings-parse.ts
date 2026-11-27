@@ -6,11 +6,16 @@ export type Settings = AppSettings
 export const DEFAULT_SETTINGS: Settings = {
   loPathOverride: '',
   cacheBudgetMb: 2048,
-  recentFiles: []
+  recentFiles: [],
+  enableTransitions: true
 }
 
 function asString(value: unknown, fallback: string, max = 32767): string {
   return typeof value === 'string' && value.length <= max ? value : fallback
+}
+
+function asBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
 }
 
 function asInt(value: unknown, fallback: number, min: number, max: number): number {
@@ -39,7 +44,8 @@ export function parseSettings(raw: unknown): Settings {
   return {
     loPathOverride: asString(value.loPathOverride, DEFAULT_SETTINGS.loPathOverride),
     cacheBudgetMb: asInt(value.cacheBudgetMb, DEFAULT_SETTINGS.cacheBudgetMb, 128, 8192),
-    recentFiles
+    recentFiles,
+    enableTransitions: asBool(value.enableTransitions, DEFAULT_SETTINGS.enableTransitions)
   }
 }
 

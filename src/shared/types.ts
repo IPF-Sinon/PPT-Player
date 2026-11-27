@@ -74,6 +74,8 @@ export interface AppSettings {
   cacheBudgetMb: number
   /** Recent files, newest first. */
   recentFiles: string[]
+  /** Play slide transitions during fullscreen playback. */
+  enableTransitions: boolean
 }
 
 /** Everything the first screen needs, returned in one IPC round trip. */

@@ -4,18 +4,26 @@
  * This is what makes a teaching deck behave: the question shows, and each answer
  * appears only when the presenter advances.
  *
- * The real OOXML shape is deeper than it looks. A click group is a `p:par` whose
- * `p:cTn` carries `nodeType="clickEffect"` and `presetClass="entr"`; the target lives
- * in a `p:cBhvr` several levels below, and `p:withEffect` / `p:afterEffect` pars
- * inside it belong to the same click. Parsing by nesting depth therefore misses
- * real decks, so the walk below is by nodeType instead.
+ * The real OOXML shape is deeper than it looks. A click group is a p:par whose
+ * p:cTn carries nodeType="clickEffect" and presetClass="entr"; the target lives in
+ * a p:cBhvr several levels below, and p:withEffect / p:afterEffect pars inside it
+ * belong to the same click. Parsing by nesting depth therefore misses real decks,
+ * so the walk below is by nodeType instead.
  *
  * Evaluation is absolute: given a step number, compute which elements are visible.
  * Nothing is stateful, so jumping backwards is as exact as stepping forwards.
  */
 
-import type { AnimationEffect, AnimationStep, SlideElement, StepState } from './types'
-import { attr, attrNum, child, descendants, first } from './xml'
+import type {
+  AnimationEffect,
+  AnimationStep,
+  MotionPath,
+  SlideElement,
+  StepState,
+  TriggerTrack
+} from './types'
+import { attr, attrNum, attrBool, child, descendants, first } from './xml'
+import { linePathFrom, makeMotionPath, ooxmlPathToSvgD } from './motion-path'
 
 /** presetID values that map onto a visual animation we implement. */
 const PRESET_MAP: Record<string, AnimationEffect['preset']> = {
@@ -60,10 +68,57 @@ function kindOf(ctn: Element | null): AnimationEffect['kind'] | null {
   if (presetClass === 'entr') return 'enter'
   if (presetClass === 'exit') return 'exit'
   if (presetClass === 'emph') return 'emphasis'
-  // path and verb animations are not modelled; treating them as emphasis keeps the
-  // element visible rather than silently dropping it from the slide.
-  if (presetClass === 'path' || presetClass === 'verb') return 'emphasis'
+  // A path animation moves the shape without changing visibility.
+  if (presetClass === 'path') return 'motion'
+  if (presetClass === 'verb') return 'emphasis'
   return null
+}
+
+/** Size used to denormalise path coordinates when the caller did not supply one. */
+const DEFAULT_SLIDE = { width: 960, height: 540 }
+
+/**
+ * Read the motion path declared by a p:animMotion behaviour.
+ *
+ * Coordinates in OOXML are fractions of the slide, and some producers skip the
+ * path attribute entirely and use from/to/by instead, so both forms are handled.
+ */
+function readMotion(par: Element, slide: { width: number; height: number }): MotionPath | null {
+  const motionEl = first(par, 'animMotion')
+  if (!motionEl) return null
+
+  const pathAttr = attr(motionEl, 'path')
+  let d = ooxmlPathToSvgD(pathAttr, slide.width, slide.height)
+
+  if (!d) {
+    const readPoint = (name: string): { x: number; y: number } | null => {
+      const raw = attr(motionEl, name)
+      if (!raw) return null
+      const parts = raw.trim().split(/[ ,]+/).map(Number)
+      if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return null
+      return { x: parts[0], y: parts[1] }
+    }
+    d = linePathFrom(
+      readPoint('from'),
+      readPoint('to'),
+      readPoint('by'),
+      slide.width,
+      slide.height
+    )
+  }
+
+  if (!d) return null
+
+  const ctn = first(motionEl, 'cTn')
+  const repeatRaw = attr(ctn, 'repeatCount')
+  const repeatCount = repeatRaw ? Number(repeatRaw) : 1
+
+  return makeMotionPath(d, {
+    autoReverse: attrBool(motionEl, 'autoRev'),
+    repeatCount: Number.isFinite(repeatCount) ? repeatCount : 1,
+    accel: attrNum(ctn, 'accel', 0) / 100000,
+    decel: attrNum(ctn, 'decel', 0) / 100000
+  })
 }
 
 /**
@@ -72,7 +127,10 @@ function kindOf(ctn: Element | null): AnimationEffect['kind'] | null {
  * The preset, duration and delay sit on this par's own cTn; the target sits on the
  * first cBhvr anywhere below, because PowerPoint wraps it in a set/animEffect pair.
  */
-function readEffect(par: Element): AnimationEffect | null {
+function readEffect(
+  par: Element,
+  slide: { width: number; height: number } = DEFAULT_SLIDE
+): AnimationEffect | null {
   const outerCtn = child(par, 'cTn')
 
   // The clickEffect par carries presetID="1" (a placeholder "appear"); the real
@@ -99,7 +157,6 @@ function readEffect(par: Element): AnimationEffect | null {
 
   const presetId = attr(ctn, 'presetID') ?? ''
   const presetClass = attr(ctn, 'presetClass') ?? ''
-  const preset = PRESET_MAP[presetId] ?? (presetClass === 'emph' ? 'pulse' : 'fade')
 
   const delay = attrNum(ctn, 'delay', 0)
   // The visible duration is the largest dur in the group: the p:set uses dur="1"
@@ -109,6 +166,22 @@ function readEffect(par: Element): AnimationEffect | null {
     const value = attrNum(node, 'dur', -1)
     if (value > duration) duration = value
   }
+
+  if (kind === 'motion') {
+    const motion = readMotion(par, slide)
+    if (!motion) return null
+    // Motion paths default to a long, visible duration when none is declared.
+    return {
+      targetId,
+      kind,
+      preset: 'path',
+      delay,
+      duration: duration > 0 ? duration : 2000,
+      motion
+    }
+  }
+
+  const preset = PRESET_MAP[presetId] ?? (presetClass === 'emph' ? 'pulse' : 'fade')
 
   return {
     targetId,
@@ -134,24 +207,22 @@ function joinsStep(par: Element): boolean {
 }
 
 /**
- * Collect steps from the timing tree.
+ * Add an effect once per target and kind.
  *
- * Walks in document order: a click group opens a new step, and any with/after
- * effect either inside it or following it joins that step. This matches how a
- * presenter experiences the deck, one click at a time.
+ * A single click writes a p:set plus a p:animEffect for the same shape, and both
+ * parse into an effect. Keeping only the first is what makes one click equal one
+ * visible change instead of a double-length animation.
  */
-export function parseAnimations(timing: Element | null): AnimationStep[] {
-  if (!timing) return []
+function addEffect(bucket: AnimationEffect[], effect: AnimationEffect): void {
+  const exists = bucket.some((e) => e.targetId === effect.targetId && e.kind === effect.kind)
+  if (!exists) bucket.push(effect)
+}
 
-  // PowerPoint puts nodeType="mainSeq" on the cTn inside p:seq, not on p:seq.
-  const sequences = descendants(timing, 'seq')
-  const mainSeq =
-    sequences.find((seq) => attr(child(seq, 'cTn'), 'nodeType') === 'mainSeq') ??
-    sequences.find((seq) => attr(seq, 'nodeType') === 'mainSeq') ??
-    sequences[0] ??
-    null
-  if (!mainSeq) return []
-
+/** Collect the click steps under one sequence element. */
+function stepsFrom(
+  seq: Element,
+  slide: { width: number; height: number }
+): AnimationStep[] {
   const steps: AnimationStep[] = []
 
   const openStep = (): AnimationEffect[] => {
@@ -160,43 +231,25 @@ export function parseAnimations(timing: Element | null): AnimationStep[] {
     return effects
   }
 
-  /**
-   * Add an effect once per target and kind.
-   *
-   * A single click writes a p:set plus a p:animEffect for the same shape, and both
-   * parse into an effect. Keeping only the first is what makes one click equal one
-   * visible change instead of a double-length animation.
-   */
-  const addEffect = (bucket: AnimationEffect[], effect: AnimationEffect): void => {
-    const exists = bucket.some((e) => e.targetId === effect.targetId && e.kind === effect.kind)
-    if (!exists) bucket.push(effect)
-  }
-
-  const visit = (node: Element): void => {
-    // Every descendant par is a candidate; nesting depth is not a reliable signal.
-    for (const par of descendants(node, 'par')) {
-      if (startsStep(par)) {
-        const bucket = openStep()
-        const effect = readEffect(par)
-        if (effect) addEffect(bucket, effect)
-        // Nested with/after effects inside this click belong to the same step.
-        for (const nested of descendants(par, 'par')) {
-          if (nested === par || startsStep(nested)) continue
-          if (!joinsStep(nested)) continue
-          const inner = readEffect(nested)
-          if (inner) addEffect(bucket, inner)
-        }
-      } else if (joinsStep(par)) {
-        const target = steps.length > 0 ? steps[steps.length - 1].effects : openStep()
-        const effect = readEffect(par)
-        if (effect) addEffect(target, effect)
+  for (const par of descendants(seq, 'par')) {
+    if (startsStep(par)) {
+      const bucket = openStep()
+      const effect = readEffect(par, slide)
+      if (effect) addEffect(bucket, effect)
+      // Nested with/after effects inside this click belong to the same step.
+      for (const nested of descendants(par, 'par')) {
+        if (nested === par || startsStep(nested)) continue
+        if (!joinsStep(nested)) continue
+        const inner = readEffect(nested, slide)
+        if (inner) addEffect(bucket, inner)
       }
+    } else if (joinsStep(par)) {
+      const target = steps.length > 0 ? steps[steps.length - 1].effects : openStep()
+      const effect = readEffect(par, slide)
+      if (effect) addEffect(target, effect)
     }
   }
 
-  visit(mainSeq)
-
-  // Drop steps that produced nothing, keeping indices contiguous.
   const usable = steps.filter((step) => step.effects.length > 0)
   usable.forEach((step, index) => {
     step.index = index + 1
@@ -204,24 +257,105 @@ export function parseAnimations(timing: Element | null): AnimationStep[] {
   return usable
 }
 
+/** Find the sequence whose cTn carries the given nodeType. */
+function findSequence(timing: Element, nodeType: string): Element | null {
+  for (const seq of descendants(timing, 'seq')) {
+    if (attr(child(seq, 'cTn'), 'nodeType') === nodeType) return seq
+    if (attr(seq, 'nodeType') === nodeType) return seq
+  }
+  return null
+}
+
+/**
+ * Collect the main click sequence.
+ *
+ * PowerPoint puts nodeType="mainSeq" on the cTn inside p:seq, not on p:seq, so
+ * looking on the seq element itself yields no animations at all.
+ */
+export function parseAnimations(
+  timing: Element | null,
+  slide: { width: number; height: number } = DEFAULT_SLIDE
+): AnimationStep[] {
+  if (!timing) return []
+  const mainSeq =
+    findSequence(timing, 'mainSeq') ??
+    descendants(timing, 'seq')[0] ??
+    null
+  if (!mainSeq) return []
+  return stepsFrom(mainSeq, slide)
+}
+
+/**
+ * Collect click-triggered tracks.
+ *
+ * An interactive sequence is bound to a shape: clicking that shape advances its own
+ * timeline instead of the slide's. Decks use this for "click the button to reveal
+ * the matching answer", so each button needs an independent track.
+ */
+export function parseTriggers(
+  timing: Element | null,
+  slide: { width: number; height: number } = DEFAULT_SLIDE
+): Record<string, TriggerTrack> {
+  const out: Record<string, TriggerTrack> = {}
+  if (!timing) return out
+
+  for (const seq of descendants(timing, 'seq')) {
+    const isInteractive = attr(child(seq, 'cTn'), 'nodeType') === 'interactiveSeq'
+    if (!isInteractive) continue
+
+    // The trigger shape is named by the onClick condition on the sequence itself.
+    let triggerId = ''
+    const conds = descendants(seq, 'cond')
+    for (const cond of conds) {
+      if (attr(cond, 'evt') !== 'onClick') continue
+      const spTgt = first(cond, 'spTgt')
+      const spid = attr(spTgt, 'spid')
+      if (spid) {
+        triggerId = spid
+        break
+      }
+    }
+    if (!triggerId) continue
+
+    const steps = stepsFrom(seq, slide)
+    if (steps.length === 0) continue
+
+    const ctn = child(seq, 'cTn')
+    out[triggerId] = {
+      triggerId,
+      steps,
+      restart: attrBool(ctn, 'restart')
+    }
+  }
+
+  return out
+}
+
 /**
  * Compute the visible set and the animations to run for a given step.
  *
- * `step === 0` is the state before any click: every `enter` target is hidden and
- * every `exit` target is shown.
+ * step === 0 is the state before any click: every enter target is hidden and every
+ * exit target is shown. Trigger targets are hidden too, because they are revealed
+ * by clicking their button rather than by advancing.
  */
 export function evaluateStep(
   steps: AnimationStep[],
   step: number,
-  options: { showAll?: boolean } = {}
+  options: {
+    showAll?: boolean
+    triggers?: Record<string, TriggerTrack>
+    /** Per-trigger progress: how many of that track's steps have run. */
+    triggerProgress?: Record<string, number>
+  } = {}
 ): StepState {
   const visible = new Set<string>()
   const entering = new Map<string, AnimationEffect>()
   const leaving = new Map<string, AnimationEffect>()
+  const moving = new Map<string, AnimationEffect>()
   const hiddenParagraphs = new Map<string, Array<{ start: number; end: number }>>()
 
   if (options.showAll) {
-    return { visible, entering, leaving, hiddenParagraphs }
+    return { visible, entering, leaving, moving, hiddenParagraphs }
   }
 
   const enterTargets = new Set<string>()
@@ -244,6 +378,8 @@ export function evaluateStep(
       } else if (effect.kind === 'exit') {
         visible.delete(effect.targetId)
         if (s.index === effectiveStep) leaving.set(effect.targetId, effect)
+      } else if (effect.kind === 'motion') {
+        if (s.index === effectiveStep) moving.set(effect.targetId, effect)
       }
       if (effect.paragraphRange) {
         const key = effect.targetId
@@ -268,7 +404,28 @@ export function evaluateStep(
     if (!enterTargets.has(id)) visible.add(id)
   }
 
-  return { visible, entering, leaving, hiddenParagraphs }
+  // Trigger tracks reveal their own targets, independent of the main sequence.
+  const triggers = options.triggers ?? {}
+  const progress = options.triggerProgress ?? {}
+  for (const track of Object.values(triggers)) {
+    const done = Math.max(0, Math.min(progress[track.triggerId] ?? 0, track.steps.length))
+    for (const s of track.steps) {
+      if (s.index > done) continue
+      for (const effect of s.effects) {
+        if (effect.kind === 'enter') {
+          visible.add(effect.targetId)
+          if (s.index === done) entering.set(effect.targetId, effect)
+        } else if (effect.kind === 'exit') {
+          visible.delete(effect.targetId)
+          if (s.index === done) leaving.set(effect.targetId, effect)
+        } else if (effect.kind === 'motion') {
+          if (s.index === done) moving.set(effect.targetId, effect)
+        }
+      }
+    }
+  }
+
+  return { visible, entering, leaving, moving, hiddenParagraphs }
 }
 
 /** Total click steps a slide declares. */
@@ -277,15 +434,24 @@ export function stepCountOf(steps: AnimationStep[]): number {
 }
 
 /** Elements that must start hidden because an enter effect targets them. */
-export function initiallyHidden(steps: AnimationStep[]): Set<string> {
+export function initiallyHidden(
+  steps: AnimationStep[],
+  triggers: Record<string, TriggerTrack> = {}
+): Set<string> {
   const hidden = new Set<string>()
   const exits = new Set<string>()
-  for (const s of steps) {
-    for (const effect of s.effects) {
-      if (effect.kind === 'enter') hidden.add(effect.targetId)
-      if (effect.kind === 'exit') exits.add(effect.targetId)
+  const collect = (list: AnimationStep[]): void => {
+    for (const s of list) {
+      for (const effect of s.effects) {
+        if (effect.kind === 'enter') hidden.add(effect.targetId)
+        if (effect.kind === 'exit') exits.add(effect.targetId)
+      }
     }
   }
+  collect(steps)
+  // A target revealed by a trigger button must also start hidden, otherwise the
+  // answer is already on screen before the button is ever pressed.
+  for (const track of Object.values(triggers)) collect(track.steps)
   for (const id of exits) hidden.delete(id)
   return hidden
 }
@@ -296,10 +462,21 @@ export function hasParagraphAnimation(steps: AnimationStep[]): boolean {
 }
 
 /** Collect every shape id referenced by an animation. */
-export function animatedTargets(steps: AnimationStep[]): Set<string> {
+export function animatedTargets(
+  steps: AnimationStep[],
+  triggers: Record<string, TriggerTrack> = {}
+): Set<string> {
   const ids = new Set<string>()
   for (const s of steps) for (const e of s.effects) ids.add(e.targetId)
+  for (const track of Object.values(triggers)) {
+    for (const s of track.steps) for (const e of s.effects) ids.add(e.targetId)
+  }
   return ids
+}
+
+/** Collect the shape ids that act as trigger buttons. */
+export function triggerTargets(triggers: Record<string, TriggerTrack>): Set<string> {
+  return new Set(Object.keys(triggers))
 }
 
 /** Flatten a slide's element tree so ids can be looked up. */

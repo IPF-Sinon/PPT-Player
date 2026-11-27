@@ -8,7 +8,7 @@ import type { SlideModel } from '../lib/pptx/types'
 import { PlayToolbar, type PlayTool } from '../components/PlayToolbar'
 import { InkLayer } from '../components/InkLayer'
 import { Whiteboard } from '../components/Whiteboard'
-import { PptxSlideView } from '../components/PptxSlideView'
+import { PptxTransition } from '../components/PptxTransition'
 import '../styles/playback.css'
 import '../styles/pptx.css'
 
@@ -28,6 +28,9 @@ export default function PlaybackPage() {
   const [painted, setPainted] = useState(false)
   const [box, setBox] = useState({ width: 0, height: 0 })
   const [slide, setSlide] = useState<SlideModel | null>(null)
+  /** Per-trigger progress, reset whenever the page changes. */
+  const [triggerProgress, setTriggerProgress] = useState<Record<string, number>>({})
+  const [transitionsOn, setTransitionsOn] = useState(true)
 
   const frameRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -62,7 +65,11 @@ export default function PlaybackPage() {
     let cancelled = false
     void (async () => {
       const model = await tab.nativeDeck!.loadSlide(pageIndex)
-      if (!cancelled) setSlide(model)
+      if (!cancelled) {
+        setSlide(model)
+        // Each slide starts with none of its trigger tracks run.
+        setTriggerProgress({})
+      }
     })()
     return () => {
       cancelled = true
@@ -119,6 +126,18 @@ export default function PlaybackPage() {
 
   const exitShow = useCallback((): void => {
     void window.api.exitPlayback()
+  }, [])
+
+  // Transitions are a preference, read once when the show starts.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const settings = await window.api.getSettings()
+      if (!cancelled) setTransitionsOn(settings.enableTransitions !== false)
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -318,7 +337,24 @@ export default function PlaybackPage() {
           style={{ ['--slide-ratio' as string]: String(ratio) }}
         >
           {isNative && slide ? (
-            <PptxSlideView slide={slide} step={step} fit />
+            <PptxTransition
+              slide={slide}
+              step={step}
+              transition={slide.transition}
+              enabled={transitionsOn}
+              slideKey={tab.tabId + ':' + pageIndex}
+              triggerProgress={triggerProgress}
+              inkActive={tool !== 'pointer'}
+              onTrigger={(triggerId) => {
+                const track = slide.triggers[triggerId]
+                if (!track) return
+                const done = triggerProgress[triggerId] ?? 0
+                // Clicking past the last step either restarts the track or holds it.
+                const nextStep = done >= track.steps.length ? (track.restart ? 1 : done) : done + 1
+                setTriggerProgress((prev) => ({ ...prev, [triggerId]: nextStep }))
+                pokeChrome()
+              }}
+            />
           ) : (
             <canvas ref={canvasRef} data-testid="playback-canvas" />
           )}

@@ -39,7 +39,8 @@ import {
   shapeChildren
 } from './fill'
 import { parseTextBody } from './text'
-import { parseAnimations } from './animations'
+import { parseAnimations, parseTriggers } from './animations'
+import { parseTransition } from './transition'
 import { parseRelationships, relsPartFor, resolvePartTarget } from './rels'
 
 export interface SlideLoadContext {
@@ -354,7 +355,11 @@ export async function parseSlide(
     (spTree ? descendants(spTree, 'oleObj').length > 0 : false)
 
   const timing = first(root, 'timing')
-  const steps = parseAnimations(timing)
+  // Motion path coordinates are normalised to the slide box, so the parser needs
+  // its size to produce pixel paths.
+  const steps = parseAnimations(timing, ctx.slideSize)
+  const triggers = parseTriggers(timing, ctx.slideSize)
+  const transition = parseTransition(root)
 
   return {
     index: slideIndex,
@@ -362,6 +367,8 @@ export async function parseSlide(
     background: background ?? { kind: 'solid', color: '#ffffff' },
     elements,
     steps,
+    triggers,
+    transition,
     hasComplexObjects: complex,
     layoutName
   }

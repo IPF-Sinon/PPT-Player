@@ -159,18 +159,60 @@ export interface AnimationStep {
   effects: AnimationEffect[]
 }
 
+/**
+ * A motion path, in slide pixels.
+ *
+ * OOXML writes paths as normalised fractions of the slide box with a compact
+ * command language. They are converted to pixels at parse time so the renderer
+ * never has to know about the normalisation.
+ */
+export interface MotionPath {
+  /** SVG path commands in slide pixels, relative to the shape's own origin. */
+  d: string
+  /** Total length in px, filled in by the renderer once it can measure. */
+  length?: number
+  /** True when the path should run back to its start after finishing. */
+  autoReverse?: boolean
+  /** How many times the path repeats. 1 means once. */
+  repeatCount?: number
+  /** Acceleration and deceleration as fractions of the duration. */
+  accel?: number
+  decel?: number
+}
+
 export interface AnimationEffect {
   /** Shape id the effect applies to. */
   targetId: string
   /** Paragraph range inside the target, when the effect is text-level. */
   paragraphRange?: { start: number; end: number }
-  kind: 'enter' | 'exit' | 'emphasis'
-  /** Visual preset, mapped to a CSS animation. */
-  preset: 'appear' | 'fade' | 'fly' | 'wipe' | 'zoom' | 'spin' | 'pulse'
+  kind: 'enter' | 'exit' | 'emphasis' | 'motion'
+  /** Visual preset, mapped to a CSS animation. Motion uses the path instead. */
+  preset: 'appear' | 'fade' | 'fly' | 'wipe' | 'zoom' | 'spin' | 'pulse' | 'path'
   /** Direction for fly and wipe. */
   direction?: 'left' | 'right' | 'up' | 'down'
   /** Delay in ms from the start of its step. */
   delay: number
+  /** Duration in ms. */
+  duration: number
+  /** Set for kind === 'motion'. */
+  motion?: MotionPath
+}
+
+/** A click-triggered animation track, keyed by the shape that starts it. */
+export interface TriggerTrack {
+  /** Shape id of the button the audience clicks. */
+  triggerId: string
+  /** Steps revealed by successive clicks on that button. */
+  steps: AnimationStep[]
+  /** True when the track restarts after its last step instead of holding. */
+  restart?: boolean
+}
+
+/** A slide transition, applied when entering the slide. */
+export interface SlideTransition {
+  type: 'fade' | 'push' | 'wipe' | 'cover' | 'pull' | 'zoom' | 'split' | 'cut'
+  /** Direction for the directional types. */
+  direction?: 'left' | 'right' | 'up' | 'down'
   /** Duration in ms. */
   duration: number
 }
@@ -181,6 +223,10 @@ export interface SlideModel {
   background?: Paint
   elements: SlideElement[]
   steps: AnimationStep[]
+  /** Click-triggered tracks, keyed by the button shape id. */
+  triggers: Record<string, TriggerTrack>
+  /** Transition to play when this slide is entered. */
+  transition?: SlideTransition
   /** True when charts, SmartArt, equations or OLE were met on this slide. */
   hasComplexObjects: boolean
   /** Layout and master names, kept for diagnostics. */
@@ -205,6 +251,8 @@ export interface StepState {
   entering: Map<string, AnimationEffect>
   /** Element id to the animation it should play when it leaves. */
   leaving: Map<string, AnimationEffect>
+  /** Element id to the path motion to run. */
+  moving: Map<string, AnimationEffect>
   /** Paragraph ranges that are still hidden on a partially revealed text box. */
   hiddenParagraphs: Map<string, Array<{ start: number; end: number }>>
 }

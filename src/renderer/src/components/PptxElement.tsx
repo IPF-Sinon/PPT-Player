@@ -13,8 +13,13 @@ interface PptxElementProps {
   element: SlideElement
   visible: boolean
   animation?: AnimationEffect
+  /** Translation from a motion path, in slide pixels. */
+  offset?: { x: number; y: number }
   hiddenParagraphs?: Array<{ start: number; end: number }>
   showAll: boolean
+  /** True when this shape starts a trigger track. */
+  isTrigger?: boolean
+  onTrigger?: (id: string) => void
 }
 
 /** CSS value for a paint, including gradients. */
@@ -41,6 +46,7 @@ function animationStyle(effect: AnimationEffect | undefined): React.CSSPropertie
   const duration = effect.duration > 0 ? effect.duration : 400
   const delay = effect.delay > 0 ? effect.delay : 0
 
+  // Motion is driven by requestAnimationFrame rather than CSS, so it has no entry.
   const presets: Record<AnimationEffect['preset'], string> = {
     appear: 'pptx-appear',
     fade: 'pptx-fade',
@@ -48,8 +54,11 @@ function animationStyle(effect: AnimationEffect | undefined): React.CSSPropertie
     wipe: 'pptx-wipe-' + (effect.direction ?? 'left'),
     zoom: 'pptx-zoom',
     spin: 'pptx-spin',
-    pulse: 'pptx-pulse'
+    pulse: 'pptx-pulse',
+    path: 'none'
   }
+
+  if (effect.preset === 'path') return {}
 
   return {
     animationName: presets[effect.preset],
@@ -60,7 +69,11 @@ function animationStyle(effect: AnimationEffect | undefined): React.CSSPropertie
   }
 }
 
-function baseStyle(element: SlideElement, visible: boolean): React.CSSProperties {
+function baseStyle(
+  element: SlideElement,
+  visible: boolean,
+  offset?: { x: number; y: number }
+): React.CSSProperties {
   const style: React.CSSProperties = {
     position: 'absolute',
     left: element.rect.x,
@@ -69,6 +82,11 @@ function baseStyle(element: SlideElement, visible: boolean): React.CSSProperties
     height: element.rect.height,
     // Hidden elements keep their box so layout never shifts as steps advance.
     visibility: visible ? 'visible' : 'hidden'
+  }
+  // A motion path translates the shape away from its authored position.
+  if (offset && (offset.x !== 0 || offset.y !== 0)) {
+    style.left = element.rect.x + offset.x
+    style.top = element.rect.y + offset.y
   }
   if (element.rotation) {
     style.transform = `rotate(${element.rotation}deg)`
@@ -310,8 +328,8 @@ function renderTable(table: TableElement): React.JSX.Element {
  * parser has already normalised into slide pixels.
  */
 export function PptxElement(props: PptxElementProps): React.JSX.Element | null {
-  const { element, visible, animation, hiddenParagraphs } = props
-  const style = { ...baseStyle(element, visible), ...animationStyle(animation) }
+  const { element, visible, animation, hiddenParagraphs, offset, isTrigger, onTrigger } = props
+  const style = { ...baseStyle(element, visible, offset), ...animationStyle(animation) }
 
   if (element.type === 'group') {
     return (
@@ -323,14 +341,34 @@ export function PptxElement(props: PptxElementProps): React.JSX.Element | null {
             visible={visible}
             hiddenParagraphs={hiddenParagraphs}
             showAll={props.showAll}
+            isTrigger={isTrigger}
+            onTrigger={onTrigger}
           />
         ))}
       </div>
     )
   }
 
+  // A trigger button must look clickable and must not let the click reach the
+  // stage, where it would advance the slide instead of running its own track.
+  if (isTrigger && onTrigger) {
+    style.cursor = 'pointer'
+  }
+
   return (
-    <div style={style} data-shape-id={element.id}>
+    <div
+      style={style}
+      data-shape-id={element.id}
+      data-trigger={isTrigger ? 'true' : undefined}
+      onClick={
+        isTrigger && onTrigger
+          ? (event) => {
+              event.stopPropagation()
+              onTrigger(element.id)
+            }
+          : undefined
+      }
+    >
       {element.type === 'shape' ? renderShape(element, hiddenParagraphs) : null}
       {element.type === 'picture' ? renderPicture(element) : null}
       {element.type === 'table' ? renderTable(element) : null}
