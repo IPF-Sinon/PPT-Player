@@ -273,11 +273,65 @@ async function buildTriggers() {
   writeFileSync(join(outDir, 'deck-triggers.pptx'), Buffer.from(zipSync(files)))
 }
 
+/**
+ * Deck whose cover block exits on click.
+ *
+ * The block sits over the answer and must vanish for good once revealed; this is the
+ * pattern that exposed the exit-rebound bug, so the fixture keeps it.
+ */
+async function buildExit() {
+  const pptx = new PptxGenJS()
+  pptx.layout = 'LAYOUT_16x9'
+  const slide = pptx.addSlide()
+  slide.background = { color: 'FFFFFF' }
+  slide.addText('问题：本诗的手法？', { x: 0.6, y: 0.5, w: 8.8, h: 0.7, fontSize: 24, bold: true })
+  slide.addText('答案：以动衬静', { x: 1.0, y: 2.0, w: 7, h: 0.9, fontSize: 20 })
+  slide.addShape('rect', { x: 0.8, y: 1.85, w: 7.4, h: 1.2, fill: { color: 'E8EEF9' } })
+
+  const buffer = await pptx.write({ outputType: 'nodebuffer' })
+  const files = unzipSync(new Uint8Array(buffer))
+  const key = 'ppt/slides/slide1.xml'
+  const xml = strFromU8(files[key])
+
+  const idOf = (needle) => {
+    const at = xml.indexOf(needle)
+    if (at < 0) throw new Error('shape not found: ' + needle)
+    const ids = [...xml.slice(0, at).matchAll(/<p:cNvPr id="(\d+)"/g)]
+    return ids[ids.length - 1][1]
+  }
+  const coverId = idOf('E8EEF9')
+
+  const exitPar =
+    '<p:par><p:cTn id="5" presetID="1" presetClass="exit" fill="hold" nodeType="clickEffect">' +
+    '<p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>' +
+    '<p:par><p:cTn id="6" presetID="10" presetClass="exit" fill="hold" nodeType="withEffect">' +
+    '<p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>' +
+    '<p:set><p:cBhvr><p:cTn id="7" dur="1" fill="hold">' +
+    '<p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn>' +
+    '<p:tgtEl><p:spTgt spid="' + coverId + '"/></p:tgtEl>' +
+    '<p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst>' +
+    '</p:cBhvr><p:to><p:strVal val="hidden"/></p:to></p:set>' +
+    '<p:animEffect transition="out" filter="fade"><p:cBhvr><p:cTn id="8" dur="400"/>' +
+    '<p:tgtEl><p:spTgt spid="' + coverId + '"/></p:tgtEl></p:cBhvr></p:animEffect>' +
+    '</p:childTnLst></p:cTn></p:par>' +
+    '</p:childTnLst></p:cTn></p:par>'
+
+  const timing =
+    '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" nodeType="tmRoot"><p:childTnLst>' +
+    '<p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq">' +
+    '<p:childTnLst>' + exitPar + '</p:childTnLst></p:cTn></p:seq>' +
+    '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+
+  files[key] = strToU8(xml.replace('</p:sld>', timing + '</p:sld>'))
+  writeFileSync(join(outDir, 'deck-exit.pptx'), Buffer.from(zipSync(files)))
+}
+
 await build16x9()
 await build4x3()
 await buildSmokePptx()
 await buildAnimated()
 await buildTriggers()
+await buildExit()
 buildSmokeOdp()
 
-console.log('[make-fixtures] wrote deck-16x9, deck-4x3, smoke, deck-animated, deck-triggers, smoke.odp')
+console.log('[make-fixtures] wrote deck-16x9, deck-4x3, smoke, deck-animated, deck-triggers, deck-exit, smoke.odp')
