@@ -26,6 +26,8 @@ struct SpikeReport {
     range_ok: bool,
     /// Version string of the webview runtime, so results are attributable.
     webview: String,
+    /// What each probe URL returned, so a failure can be diagnosed rather than guessed.
+    notes: String,
 }
 
 /// Called by the page once it has painted. This is the end of the measurement.
@@ -41,6 +43,7 @@ fn report_painted(report: SpikeReport) -> Result<u128, String> {
         "[spike] painted_ms={} range_ok={} range_bytes={} webview={}",
         elapsed, report.range_ok, report.range_bytes, report.webview
     );
+    eprintln!("[spike] notes: {}", report.notes);
     Ok(elapsed)
 }
 
@@ -152,10 +155,19 @@ pub fn run() {
             }
 
             if !source_pdf.is_empty() {
-                if let Ok(dir) = app.path().app_data_dir() {
-                    let _ = std::fs::create_dir_all(&dir);
-                    let _ = std::fs::copy(&source_pdf, dir.join("deck.pdf"));
+                match app.path().app_data_dir() {
+                    Ok(dir) => {
+                        let _ = std::fs::create_dir_all(&dir);
+                        let dest = dir.join("deck.pdf");
+                        match std::fs::copy(&source_pdf, &dest) {
+                            Ok(bytes) => eprintln!("[spike] staged {} bytes -> {}", bytes, dest.display()),
+                            Err(err) => eprintln!("[spike] staging failed: {err}"),
+                        }
+                    }
+                    Err(err) => eprintln!("[spike] no app data dir: {err}"),
                 }
+            } else {
+                eprintln!("[spike] SPIKE_PDF not set; range probe will 404");
             }
             Ok(())
         })

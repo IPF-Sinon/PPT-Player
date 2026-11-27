@@ -98,17 +98,29 @@ jobs:
       - name: Launch and measure
         shell: pwsh
         run: |
-          # Launch the release binary, let it paint, and scrape the summary line it
-          # writes to stdout. This is the cold-start number the decision depends on.
+          # Launch the release binary and wait for it to report, rather than sleeping a
+          # fixed time: a fixed sleep either cuts the measurement short or inflates it.
           $exe = Resolve-Path "spike/src-tauri/target/release/spike.exe"
           $env:SPIKE_PDF = (Resolve-Path "spike/stage/deck.pdf").Path
+          Remove-Item spike-run.err, spike-run.out -ErrorAction SilentlyContinue
+
           $proc = Start-Process -FilePath $exe -PassThru -RedirectStandardError spike-run.err -RedirectStandardOutput spike-run.out
-          Start-Sleep -Seconds 12
+
+          # Wait for the final report, which carries the range result, up to 40s.
+          $deadline = (Get-Date).AddSeconds(40)
+          while ((Get-Date) -lt $deadline) {
+            if (Test-Path spike-run.err) {
+              $text = Get-Content spike-run.err -Raw -ErrorAction SilentlyContinue
+              if ($text -and $text.Contains('notes:')) { break }
+            }
+            Start-Sleep -Milliseconds 400
+          }
           if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+
           Write-Host "--- stderr ---"
           if (Test-Path spike-run.err) { Get-Content spike-run.err | Tee-Object -FilePath spike-run.txt -Append }
-          $line = (Get-Content spike-run.err -ErrorAction SilentlyContinue | Select-String "painted_ms").Line
-          if (-not $line) { Write-Host "::warning::no paint measurement captured" } else { Write-Host $line }
+          $paint = (Get-Content spike-run.err -ErrorAction SilentlyContinue | Select-String "painted_ms").Line
+          if (-not $paint) { Write-Host "::warning::no paint measurement captured" } else { Write-Host $paint }
 
       - uses: actions/upload-artifact@v7.0.2
         with:

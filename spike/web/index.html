@@ -125,7 +125,7 @@
        * .localhost host, while other platforms use scheme://localhost. Both are
        * tried so the measurement reports which one works rather than failing blind.
        */
-      async function probeRange() {
+      async function probeRange(notes) {
         const candidates = [
           'http://deck.localhost/deck.pdf',
           'deck://localhost/deck.pdf'
@@ -136,13 +136,13 @@
             const buf = await response.arrayBuffer()
             const contentRange = response.headers.get('Content-Range') || '(none)'
             const ok = response.status === 206 && buf.byteLength > 0
-            log('range ' + url + ' -> status=' + response.status + ' len=' + buf.byteLength +
+            notes.push(url + ' status=' + response.status + ' len=' + buf.byteLength +
               ' content-range=' + contentRange)
             if (ok || response.status === 200) {
               return { ok, bytes: buf.byteLength, status: response.status, contentRange, url }
             }
           } catch (err) {
-            log('range ' + url + ' failed: ' + err)
+            notes.push(url + ' threw: ' + err)
           }
         }
         return { ok: false, bytes: 0, status: 0, contentRange: '(error)', url: '(none)' }
@@ -163,36 +163,62 @@
       }
 
       async function main() {
-        const inked = drawInk()
-        log('ink pixels=' + inked)
+        const notes = []
 
-        const range = await probeRange()
+        // Paint is measured first and reported on its own. Doing the network probe
+        // before this would fold its latency into the startup number, which is exactly
+        // what happened on the first run: 7686 ms was a probe timeout, not a cold start.
+        const inked = drawInk()
+        notes.push('ink_pixels=' + inked)
+
+        await firstFrame()
+
+        let painted = 0
+        try {
+          painted = await window.__TAURI__.core.invoke('report_painted', {
+            report: { range_bytes: 0, range_ok: false, webview: 'pending', notes: notes.join(' | ') }
+          })
+        } catch (err) {
+          notes.push('paint report failed: ' + err)
+          painted = Math.round(performance.now())
+        }
+
+        const paintEl = document.getElementById('paint')
+        paintEl.textContent = painted + ' ms'
+        paintEl.className = painted > 0 && painted < 400 ? 'ok' : 'bad'
+
+        // Only now does the range probe run.
+        const range = await probeRange(notes)
         document.getElementById('range').textContent = range.ok ? '206 OK' : 'FAIL ' + range.status
         document.getElementById('range').className = range.ok ? 'ok' : 'bad'
 
         const webview = (navigator.userAgent.match(/Edg\/[\d.]+/) || ['unknown'])[0]
         document.getElementById('wv').textContent = webview
 
-        await firstFrame()
-
-        // Report and display the paint time.
-        let elapsed = 0
-        try {
-          elapsed = await window.__TAURI__.core.invoke('report_painted', {
-            report: { range_bytes: range.bytes, range_ok: range.ok, webview }
-          })
-        } catch (err) {
-          log('report failed: ' + err)
-          elapsed = Math.round(performance.now())
+        const summary = {
+          painted_ms: painted,
+          range_ok: range.ok,
+          range_status: range.status,
+          range_bytes: range.bytes,
+          range_url: range.url,
+          webview,
+          ink_pixels: inked
         }
 
-        const paintEl = document.getElementById('paint')
-        paintEl.textContent = elapsed + ' ms'
-        paintEl.className = elapsed > 0 && elapsed < 400 ? 'ok' : 'bad'
-        log('painted_ms=' + elapsed)
+        // Send the final, complete report so the harness sees everything at once.
+        try {
+          await window.__TAURI__.core.invoke('report_painted', {
+            report: {
+              range_bytes: range.bytes,
+              range_ok: range.ok,
+              webview,
+              notes: notes.join(' | ')
+            }
+          })
+        } catch (err) {
+          notes.push('final report failed: ' + err)
+        }
 
-        // Machine-readable line the CI harness scrapes.
-        const summary = { painted_ms: elapsed, range_ok: range.ok, range_status: range.status, range_bytes: range.bytes, webview, ink_pixels: inked }
         const line = document.createElement('div')
         line.id = 'summary'
         line.textContent = 'SPIKE_RESULT ' + JSON.stringify(summary)
