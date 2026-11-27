@@ -210,6 +210,7 @@ export function PptxSlideView({
         <div
           className="pptx-slide"
           data-testid="pptx-slide"
+          data-role={fixedScale === undefined ? 'stage' : 'thumb'}
           onDoubleClick={onDoubleClick}
           role="presentation"
           style={{

@@ -27,18 +27,23 @@ test.afterAll(async () => {
   await app?.close()
 })
 
-/** Measure an element's box together with the viewport, in one round trip. */
-async function measure(testId: string): Promise<{
+/**
+ * Measure an element's box together with the viewport, in one round trip.
+ *
+ * The selector may include an attribute filter, because the same test id appears in
+ * every thumbnail as well as on the main stage.
+ */
+async function measure(selector: string): Promise<{
   box: { x: number; y: number; width: number; height: number } | null
   viewport: { width: number; height: number }
 }> {
-  return await win.evaluate((id) => {
+  return await win.evaluate((sel) => {
     const g = globalThis as unknown as {
       innerWidth: number
       innerHeight: number
       document: { querySelector(sel: string): { getBoundingClientRect(): { x: number; y: number; width: number; height: number } } | null }
     }
-    const el = g.document.querySelector('[data-testid="' + id + '"]')
+    const el = g.document.querySelector(sel)
     const rect = el ? el.getBoundingClientRect() : null
     return {
       box: rect
@@ -52,14 +57,14 @@ async function measure(testId: string): Promise<{
 test('1. the work area fills most of the window', async () => {
   // The regression this guards: a fixed-row grid gave the tab bar row 1 and stretched
   // the header over 1fr, which squeezed the work area into the 64px footer row.
-  const { box, viewport } = await measure('preview-body')
+  const { box, viewport } = await measure('[data-testid="preview-body"]')
   expect(box).not.toBeNull()
   expect(box!.height).toBeGreaterThan(viewport.height * 0.72)
 })
 
 test('2. the footer stays fully inside the viewport', async () => {
-  const body = await measure('preview-body')
-  const footer = await measure('bottombar')
+  const body = await measure('[data-testid="preview-body"]')
+  const footer = await measure('[data-testid="bottombar"]')
   expect(footer.box).not.toBeNull()
   // The bar must not be clipped by the window edge, which is what happened when the
   // grid pushed it onto a fourth row.
@@ -73,7 +78,7 @@ test('2. the footer stays fully inside the viewport', async () => {
 test('3. the start button is visible and clickable without scrolling', async () => {
   const button = win.getByTestId('start-show')
   await expect(button).toBeVisible()
-  const { box, viewport } = await measure('start-show')
+  const { box, viewport } = await measure('[data-testid="start-show"]')
   expect(box).not.toBeNull()
   expect(box!.y).toBeGreaterThan(0)
   expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height + 1)
@@ -82,14 +87,14 @@ test('3. the start button is visible and clickable without scrolling', async () 
 
 test('4. the slide renders at a usable size', async () => {
   // A slide squeezed into the footer row measured about 30px wide.
-  const { box } = await measure('pptx-slide')
+  const { box } = await measure('[data-testid="pptx-slide"][data-role="stage"]')
   expect(box).not.toBeNull()
   expect(box!.width).toBeGreaterThanOrEqual(480)
   expect(box!.height).toBeGreaterThanOrEqual(270)
 })
 
 test('5. the slide keeps its aspect ratio', async () => {
-  const { box } = await measure('pptx-slide')
+  const { box } = await measure('[data-testid="pptx-slide"][data-role="stage"]')
   expect(box).not.toBeNull()
   const ratio = box!.width / box!.height
   expect(Math.abs(ratio - 16 / 9)).toBeLessThan(0.05)
@@ -114,7 +119,7 @@ test('6. badges stay on a single line', async () => {
 })
 
 test('7. the tab bar holds the tabs and the actions on one row', async () => {
-  const { box } = await measure('tabbar')
+  const { box } = await measure('[data-testid="tabbar"]')
   expect(box).not.toBeNull()
   // One row: tall enough for a tab, far shorter than the old stretched header.
   expect(box!.height).toBeGreaterThanOrEqual(32)
@@ -133,7 +138,7 @@ test('8. the redundant window close button is gone', async () => {
 })
 
 test('9. the thumbnail rail is wide enough to read', async () => {
-  const { box } = await measure('thumb-rail')
+  const { box } = await measure('[data-testid="thumb-rail"]')
   expect(box).not.toBeNull()
   expect(box!.width).toBeGreaterThanOrEqual(180)
   expect(box!.width).toBeLessThanOrEqual(260)
