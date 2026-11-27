@@ -22,6 +22,7 @@ import { Whiteboard } from '../components/Whiteboard'
 import { PptxTransition } from '../components/PptxTransition'
 import '../styles/playback.css'
 import '../styles/pptx.css'
+import { platform } from '../platform/api'
 
 const IDLE_MS = 2500
 
@@ -294,7 +295,7 @@ export default function PlaybackPage() {
   const persistInk = useCallback(
     (pages: InkPage[]): void => {
       const deckId = useAppStore.getState().tabs.find((t) => t.tabId === activeTabId)?.deckId
-      if (deckId) void window.api.saveInk(deckId, pages)
+      if (deckId) void platform().saveInk(deckId, pages)
       if (activeTabId) useAppStore.getState().updateTab(activeTabId, { ink: pages })
     },
     [activeTabId]
@@ -347,7 +348,7 @@ export default function PlaybackPage() {
 
   /** Leave the show immediately, without touching the annotations. */
   const leaveNow = useCallback((): void => {
-    void window.api.exitPlayback()
+    void platform().exitPlayback()
   }, [])
 
   /**
@@ -376,7 +377,7 @@ export default function PlaybackPage() {
       setExitPrompt(false)
       if (remember) {
         setInkOnExit(choice)
-        void window.api.setSettings({ inkOnExit: choice })
+        void platform().setSettings({ inkOnExit: choice })
       }
       if (choice === 'discard') persistInk(inkAtEntry.current)
       setInkDirty(false)
@@ -389,7 +390,7 @@ export default function PlaybackPage() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const settings = await window.api.getSettings()
+      const settings = await platform().getSettings()
       if (cancelled) return
       setTransitionsOn(settings.enableTransitions !== false)
       setNavPosition(settings.navButtonPosition === 'side' ? 'side' : 'bottom')
@@ -405,7 +406,7 @@ export default function PlaybackPage() {
   stateRef.current = { next, prev, boardOpen, exitShow, tab }
 
   useEffect(() => {
-    return window.api.onPlayState((state) => {
+    return platform().onPlayState((state) => {
       if (!state.active) exitShow()
     })
   }, [exitShow])

@@ -14,6 +14,7 @@ import { SettingsSheet } from '../components/Sheets'
 import { EngineDownloadModal } from '../components/EngineDownloadModal'
 import '../styles/preview.css'
 import '../styles/pptx.css'
+import { platform } from '../platform/api'
 
 export default function PreviewPage() {
   const tabs = useAppStore((s) => s.tabs)
@@ -41,7 +42,7 @@ export default function PreviewPage() {
         // Already gone is fine.
       }
     }
-    if (target.deckId) await window.api.closeDeck(target.deckId)
+    if (target.deckId) await platform().closeDeck(target.deckId)
   }, [])
 
   const mountPdf = useCallback(
@@ -74,7 +75,7 @@ export default function PreviewPage() {
         update(tabId, { pageSizes: sizes })
       }).then((sizes) => {
         if (openToken.current !== token) return
-        void window.api.reportMetrics(deckId, doc.numPages, sizes)
+        void platform().reportMetrics(deckId, doc.numPages, sizes)
       })
     },
     [update]
@@ -103,7 +104,7 @@ export default function PreviewPage() {
         deckId: ''
       })
 
-      const unsubscribe = window.api.onProgress((progress) => {
+      const unsubscribe = platform().onProgress((progress) => {
         if (token !== openToken.current) return
         const message =
           progress.stage === 'convert'
@@ -119,11 +120,11 @@ export default function PreviewPage() {
       try {
         // Native first: a PPTX needs no conversion at all.
         update(tabId, { progressMessage: '正在建立索引', progressRatio: 0.2 })
-        const native = await window.api.openNative(filePath)
+        const native = await platform().openNative(filePath)
         if (token !== openToken.current) return
 
         if (native && native.ok) {
-          const deck = await loadNativeDeck(native.deckId, native.slidePaths, native.slideSize, window.api)
+          const deck = await loadNativeDeck(native.deckId, native.slidePaths, native.slideSize, platform())
           if (token !== openToken.current) return
           update(tabId, {
             engineMode: 'native-pptx',
@@ -136,19 +137,19 @@ export default function PreviewPage() {
             progressRatio: 1,
             convertMs: 0
           })
-          const ink = await window.api.loadInk(native.deckId)
+          const ink = await platform().loadInk(native.deckId)
           update(tabId, { ink })
           document.title = zh.windowTitle(existing?.title ?? '')
           return
         }
 
         // Fall back to conversion for legacy, ODP and encrypted-free decks.
-        const result = await window.api.open(filePath)
+        const result = await platform().open(filePath)
         if (token !== openToken.current) return
         if (!result.ok) {
           // The lite build has no engine; offer to fetch it instead of failing.
-          const status = await window.api.engineStatus()
-          const variant = await window.api.engineVariant()
+          const status = await platform().engineStatus()
+          const variant = await platform().engineVariant()
           if (!status.available && variant.variant === 'lite') {
             update(tabId, { status: 'error', error: { message: '需要兼容引擎才能打开该格式' } })
             setEnginePrompt({ bytes: variant.engineBytes, retry: () => void openFile(filePath) })
@@ -158,12 +159,12 @@ export default function PreviewPage() {
           return
         }
         const info = result.info
-        await mountPdf(tabId, info.deckId, window.api.deckUrl(info.deckId), token, {
+        await mountPdf(tabId, info.deckId, platform().deckUrl(info.deckId), token, {
           engineMode: 'libreoffice',
           convertMs: info.convertMs,
           cached: info.cached
         })
-        const ink = await window.api.loadInk(info.deckId)
+        const ink = await platform().loadInk(info.deckId)
         update(tabId, { ink })
         document.title = zh.windowTitle(existing?.title ?? '')
       } catch (err) {
@@ -183,11 +184,11 @@ export default function PreviewPage() {
       await releaseTab(tab.tabId)
       update(tab.tabId, { engineMode: mode, status: 'loading', error: null, pdfDoc: null, nativeDeck: null })
       if (mode === 'libreoffice') {
-        const result = await window.api.open(tab.filePath)
+        const result = await platform().open(tab.filePath)
         if (token !== openToken.current) return
         if (!result.ok) {
-          const status = await window.api.engineStatus()
-          const variant = await window.api.engineVariant()
+          const status = await platform().engineStatus()
+          const variant = await platform().engineVariant()
           if (!status.available && variant.variant === 'lite') {
             update(tab.tabId, { status: 'error', error: { message: '需要兼容引擎才能使用兼容模式' } })
             setEnginePrompt({ bytes: variant.engineBytes, retry: () => void switchEngine('libreoffice') })
@@ -196,18 +197,18 @@ export default function PreviewPage() {
           update(tab.tabId, { status: 'error', error: { message: result.error.message } })
           return
         }
-        await mountPdf(tab.tabId, result.info.deckId, window.api.deckUrl(result.info.deckId), token, {
+        await mountPdf(tab.tabId, result.info.deckId, platform().deckUrl(result.info.deckId), token, {
           engineMode: 'libreoffice'
         })
         return
       }
-      const native = await window.api.openNative(tab.filePath)
+      const native = await platform().openNative(tab.filePath)
       if (token !== openToken.current) return
       if (!native || !native.ok) {
         update(tab.tabId, { status: 'error', error: { message: '该文件不支持极速动画模式' } })
         return
       }
-      const deck = await loadNativeDeck(native.deckId, native.slidePaths, native.slideSize, window.api)
+      const deck = await loadNativeDeck(native.deckId, native.slidePaths, native.slideSize, platform())
       update(tab.tabId, {
         engineMode: 'native-pptx',
         deckId: native.deckId,
@@ -231,7 +232,7 @@ export default function PreviewPage() {
   )
 
   const pick = useCallback(async (): Promise<void> => {
-    const path = await window.api.pickFile()
+    const path = await platform().pickFile()
     if (path) await openFile(path)
   }, [openFile])
 
@@ -241,7 +242,7 @@ export default function PreviewPage() {
     const file = event.dataTransfer.files.item(0)
     if (!file) return
     // Electron 32 removed File.path; the path comes from the preload bridge.
-    const path = window.api.getPathForFile(file)
+    const path = platform().getPathForFile(file)
     if (path) await openFile(path)
   }
 
@@ -249,7 +250,7 @@ export default function PreviewPage() {
     async (fromStart = false): Promise<void> => {
       if (!tab) return
       if (fromStart) useAppStore.getState().setPage(tab.tabId, 0)
-      await window.api.enterPlayback(tab.deckId, fromStart ? 0 : tab.currentPage)
+      await platform().enterPlayback(tab.deckId, fromStart ? 0 : tab.currentPage)
     },
     [tab]
   )
@@ -258,12 +259,12 @@ export default function PreviewPage() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const boot = await window.api.bootstrap()
+      const boot = await platform().bootstrap()
       if (cancelled) return
       setRecent(boot.settings.recentFiles)
       if (boot.pendingOpenPath) await openFile(boot.pendingOpenPath)
     })()
-    const off = window.api.onExternalOpen((path) => {
+    const off = platform().onExternalOpen((path) => {
       void openFile(path)
     })
     preloadPdfjs()
@@ -418,7 +419,7 @@ export default function PreviewPage() {
                 type="button"
                 className="btn"
                 data-testid="cancel-convert"
-                onClick={() => void window.api.cancelOpen()}
+                onClick={() => void platform().cancelOpen()}
               >
                 {zh.common.cancel}
               </button>
@@ -432,7 +433,7 @@ export default function PreviewPage() {
                 <p>{tab.error.message}</p>
                 {tab.error.detail ? <pre>{tab.error.detail}</pre> : null}
                 <div className="error-actions">
-                  <button type="button" className="btn" onClick={() => void window.api.openLog()}>
+                  <button type="button" className="btn" onClick={() => void platform().openLog()}>
                     {zh.engine.openLog}
                   </button>
                   <button
@@ -561,7 +562,7 @@ export default function PreviewPage() {
         onClose={() => setSettingsOpen(false)}
         onSaved={() => {
           void (async () => {
-            const settings = await window.api.getSettings()
+            const settings = await platform().getSettings()
             setRecent(settings.recentFiles)
           })()
         }}

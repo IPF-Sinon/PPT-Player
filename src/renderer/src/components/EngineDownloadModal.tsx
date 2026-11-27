@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { EngineDownloadProgress } from '@shared/types'
+import { platform } from '../platform/api'
 
 interface EngineDownloadModalProps {
   open: boolean
@@ -34,7 +35,7 @@ export function EngineDownloadModal({
 
   useEffect(() => {
     if (!open) return
-    const off = window.api.onEngineDownload((next) => {
+    const off = platform().onEngineDownload((next) => {
       setProgress(next)
       if (next.stage === 'done') {
         setBusy(false)
@@ -54,7 +55,7 @@ export function EngineDownloadModal({
     setBusy(true)
     setError(null)
     setProgress(null)
-    const result = await window.api.engineDownload()
+    const result = await platform().engineDownload()
     if (!result.ok) {
       setBusy(false)
       setError(result.message)
@@ -62,7 +63,7 @@ export function EngineDownloadModal({
   }
 
   const cancel = async (): Promise<void> => {
-    await window.api.engineDownloadCancel()
+    await platform().engineDownloadCancel()
     setBusy(false)
     setProgress(null)
   }
@@ -120,9 +121,9 @@ export function EngineDownloadModal({
                 className="btn"
                 onClick={() => {
                   void (async () => {
-                    const picked = await window.api.pickLoPath()
+                    const picked = await platform().pickLoPath()
                     if (!picked) return
-                    await window.api.setLoPath(picked)
+                    await platform().setLoPath(picked)
                     onInstalled()
                   })()
                 }}

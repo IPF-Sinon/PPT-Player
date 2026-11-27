@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { AppSettings } from '@shared/types'
 import { zh } from '@shared/strings.zh'
 import { Close } from './icons'
+import { platform } from '../platform/api'
 
 interface SettingsSheetProps {
   open: boolean
@@ -17,7 +18,7 @@ export function SettingsSheet({ open, onClose, onSaved }: SettingsSheetProps) {
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    void window.api.getSettings().then((value) => {
+    void platform().getSettings().then((value) => {
       if (!cancelled) setSettings(value)
     })
     return () => {
@@ -30,7 +31,7 @@ export function SettingsSheet({ open, onClose, onSaved }: SettingsSheetProps) {
   const patch = async (next: Partial<AppSettings>): Promise<void> => {
     setBusy(true)
     try {
-      const saved = await window.api.setSettings(next)
+      const saved = await platform().setSettings(next)
       setSettings(saved)
       onSaved(saved)
     } finally {
@@ -66,11 +67,11 @@ export function SettingsSheet({ open, onClose, onSaved }: SettingsSheetProps) {
                 className="btn"
                 disabled={busy}
                 onClick={async () => {
-                  const picked = await window.api.pickLoPath()
+                  const picked = await platform().pickLoPath()
                   if (!picked) return
-                  const status = await window.api.setLoPath(picked)
-                  setSettings(await window.api.getSettings())
-                  onSaved(await window.api.getSettings())
+                  const status = await platform().setLoPath(picked)
+                  setSettings(await platform().getSettings())
+                  onSaved(await platform().getSettings())
                   void status
                 }}
               >
@@ -184,10 +185,10 @@ export function SettingsSheet({ open, onClose, onSaved }: SettingsSheetProps) {
               <p className="sheet-hint">日志与缓存目录</p>
             </div>
             <div className="sheet-actions">
-              <button type="button" className="btn" onClick={() => void window.api.openLog()}>
+              <button type="button" className="btn" onClick={() => void platform().openLog()}>
                 {zh.common.openLog}
               </button>
-              <button type="button" className="btn" onClick={() => void window.api.revealCache()}>
+              <button type="button" className="btn" onClick={() => void platform().revealCache()}>
                 {zh.common.revealCache}
               </button>
             </div>

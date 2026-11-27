@@ -1,5 +1,6 @@
 import { lazy, useEffect, useState } from 'react'
 import PreviewPage from './pages/Preview'
+import { platform } from './platform/api'
 
 type Mode = 'preview' | 'playback'
 
@@ -7,7 +8,7 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('preview')
 
   useEffect(() => {
-    const off = window.api.onPlayState((state) => {
+    const off = platform().onPlayState((state) => {
       setMode(state.active ? 'playback' : 'preview')
     })
     return off
