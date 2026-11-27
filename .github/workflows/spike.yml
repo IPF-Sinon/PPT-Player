@@ -38,11 +38,18 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
             spike/src-tauri/target
-          key: spike-cargo-${{ hashFiles('spike/src-tauri/Cargo.toml') }}
+          key: spike-cargo-${{ hashFiles('spike/src-tauri/Cargo.toml', 'spike/src-tauri/build.rs') }}
+          restore-keys: spike-cargo-
 
+      # A prebuilt CLI instead of `cargo install tauri-cli`: building the CLI from
+      # source took over twelve minutes on every run and has nothing to do with what
+      # is being measured.
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@^2
 
       - name: Stage a PDF for the range probe
         shell: pwsh
