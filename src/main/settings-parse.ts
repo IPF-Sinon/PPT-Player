@@ -7,7 +7,10 @@ export const DEFAULT_SETTINGS: Settings = {
   loPathOverride: '',
   cacheBudgetMb: 2048,
   recentFiles: [],
-  enableTransitions: true
+  enableTransitions: true,
+  navButtonPosition: 'bottom',
+  keepToolbarInInkMode: true,
+  inkOnExit: 'ask'
 }
 
 function asString(value: unknown, fallback: string, max = 32767): string {
@@ -16,6 +19,13 @@ function asString(value: unknown, fallback: string, max = 32767): string {
 
 function asBool(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
+}
+
+/** Accept only one of the allowed literals, so a hand-edited file cannot break the UI. */
+function asEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fallback
 }
 
 function asInt(value: unknown, fallback: number, min: number, max: number): number {
@@ -45,7 +55,10 @@ export function parseSettings(raw: unknown): Settings {
     loPathOverride: asString(value.loPathOverride, DEFAULT_SETTINGS.loPathOverride),
     cacheBudgetMb: asInt(value.cacheBudgetMb, DEFAULT_SETTINGS.cacheBudgetMb, 128, 8192),
     recentFiles,
-    enableTransitions: asBool(value.enableTransitions, DEFAULT_SETTINGS.enableTransitions)
+    enableTransitions: asBool(value.enableTransitions, DEFAULT_SETTINGS.enableTransitions),
+    navButtonPosition: asEnum(value.navButtonPosition, ['bottom', 'side'], 'bottom'),
+    keepToolbarInInkMode: asBool(value.keepToolbarInInkMode, true),
+    inkOnExit: asEnum(value.inkOnExit, ['ask', 'keep', 'discard'], 'ask')
   }
 }
 

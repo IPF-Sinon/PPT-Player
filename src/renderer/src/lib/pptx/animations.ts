@@ -369,6 +369,13 @@ export function evaluateStep(
 
   const effectiveStep = Math.max(0, Math.min(step, steps.length))
 
+  // Shapes that only ever exit start visible, so there is something to remove. This
+  // has to be seeded before the replay: doing it afterwards re-added every exited
+  // shape, which is why a cover block popped back over the answer it had just left.
+  for (const id of exitTargets) {
+    if (!enterTargets.has(id)) visible.add(id)
+  }
+
   for (const s of steps) {
     if (s.index > effectiveStep) continue
     for (const effect of s.effects) {
@@ -397,11 +404,6 @@ export function evaluateStep(
         }
       }
     }
-  }
-
-  // Anything that only ever exits starts visible.
-  for (const id of exitTargets) {
-    if (!enterTargets.has(id)) visible.add(id)
   }
 
   // Trigger tracks reveal their own targets, independent of the main sequence.

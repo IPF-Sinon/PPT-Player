@@ -530,10 +530,18 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
+/* A thumbnail scales from its top-left corner and fills the card exactly. The shared
+   .pptx-stage centres its content, which pushed the scaled slide out of this small
+   box and left the card looking blank. */
+.rail-native .pptx-stage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 .rail-native .pptx-scale {
-  position: absolute;
-  top: 0;
-  left: 0;
+  transform-origin: top left;
 }
 
 /* The playback stage scales a native slide into whatever box it is given. */

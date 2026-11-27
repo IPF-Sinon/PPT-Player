@@ -47,24 +47,30 @@ function animationStyle(effect: AnimationEffect | undefined): React.CSSPropertie
   const delay = effect.delay > 0 ? effect.delay : 0
 
   // Motion is driven by requestAnimationFrame rather than CSS, so it has no entry.
+  if (effect.preset === 'path') return {}
+
+  // An exit effect must animate towards hidden. Using the entrance keyframes here is
+  // what made a cover block fade back in and stay opaque over the answer.
+  const prefix = effect.kind === 'exit' ? 'pptx-exit-' : 'pptx-'
+
   const presets: Record<AnimationEffect['preset'], string> = {
-    appear: 'pptx-appear',
-    fade: 'pptx-fade',
-    fly: 'pptx-fly-' + (effect.direction ?? 'left'),
-    wipe: 'pptx-wipe-' + (effect.direction ?? 'left'),
-    zoom: 'pptx-zoom',
-    spin: 'pptx-spin',
+    appear: effect.kind === 'exit' ? 'pptx-exit-fade' : 'pptx-appear',
+    fade: prefix + 'fade',
+    fly: prefix + 'fly-' + (effect.direction ?? 'left'),
+    wipe: prefix + 'wipe-' + (effect.direction ?? 'left'),
+    zoom: prefix + 'zoom',
+    spin: prefix + 'spin',
     pulse: 'pptx-pulse',
     path: 'none'
   }
-
-  if (effect.preset === 'path') return {}
 
   return {
     animationName: presets[effect.preset],
     animationDuration: duration + 'ms',
     animationDelay: delay + 'ms',
-    animationFillMode: 'both',
+    // forwards is what holds the final state: without it the element snaps back to
+    // its pre-animation opacity the moment the animation ends.
+    animationFillMode: 'forwards',
     animationTimingFunction: 'ease-out'
   }
 }

@@ -86,6 +86,12 @@ export interface AppSettings {
   recentFiles: string[]
   /** Play slide transitions during fullscreen playback. */
   enableTransitions: boolean
+  /** Where the previous/next buttons live during a show. */
+  navButtonPosition: 'bottom' | 'side'
+  /** Keep the toolbar visible while an ink tool is active. */
+  keepToolbarInInkMode: boolean
+  /** What to do with this session's annotations when the show ends. */
+  inkOnExit: 'ask' | 'keep' | 'discard'
 }
 
 /** Everything the first screen needs, returned in one IPC round trip. */

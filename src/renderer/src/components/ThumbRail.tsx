@@ -157,7 +157,9 @@ export function ThumbRail({ tab, queue, onSelect }: ThumbRailProps) {
     if (!deck || !isNative) return
     let cancelled = false
     void (async () => {
-      for (let i = 0; i < Math.min(deck.slideCount, 12); i++) {
+      // Every slide gets parsed: a thumbnail that never parses stays a blank card,
+      // and a 78-page deck would show 66 of them empty.
+      for (let i = 0; i < deck.slideCount; i++) {
         if (cancelled) return
         if (!deck.slides[i]) {
           await deck.loadSlide(i)

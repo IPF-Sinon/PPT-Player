@@ -81,7 +81,15 @@ export function reportMetricsSchema(raw: unknown): ReportMetricsInput {
   }
 }
 
-const SETTINGS_KEYS = new Set(['loPathOverride', 'cacheBudgetMb', 'recentFiles', 'enableTransitions'])
+const SETTINGS_KEYS = new Set([
+  'loPathOverride',
+  'cacheBudgetMb',
+  'recentFiles',
+  'enableTransitions',
+  'navButtonPosition',
+  'keepToolbarInInkMode',
+  'inkOnExit'
+])
 
 export function settingsPatchSchema(raw: unknown): Partial<AppSettings> {
   if (typeof raw !== 'object' || raw === null) fail('settings', 'must be an object')
@@ -115,6 +123,24 @@ export function settingsPatchSchema(raw: unknown): Partial<AppSettings> {
       fail('enableTransitions', 'must be a boolean')
     }
     patch.enableTransitions = value.enableTransitions
+  }
+  if (value.navButtonPosition !== undefined) {
+    if (value.navButtonPosition !== 'bottom' && value.navButtonPosition !== 'side') {
+      fail('navButtonPosition', 'must be bottom or side')
+    }
+    patch.navButtonPosition = value.navButtonPosition
+  }
+  if (value.keepToolbarInInkMode !== undefined) {
+    if (typeof value.keepToolbarInInkMode !== 'boolean') {
+      fail('keepToolbarInInkMode', 'must be a boolean')
+    }
+    patch.keepToolbarInInkMode = value.keepToolbarInInkMode
+  }
+  if (value.inkOnExit !== undefined) {
+    if (value.inkOnExit !== 'ask' && value.inkOnExit !== 'keep' && value.inkOnExit !== 'discard') {
+      fail('inkOnExit', 'must be ask, keep or discard')
+    }
+    patch.inkOnExit = value.inkOnExit
   }
   return patch
 }

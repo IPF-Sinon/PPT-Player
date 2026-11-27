@@ -1,20 +1,11 @@
 import type { ReactNode } from 'react'
 import { Board, ChevronLeft, ChevronRight, EndShow, Eraser, Pen, Pointer, Trash, Undo } from './icons'
+import { EraserPopover, PenPopover } from './InkPopover'
 
 export type PlayTool = 'pointer' | 'pen' | 'eraser'
 
-const COLORS = [
-  { value: '#ef4444', label: '红' },
-  { value: '#3b82f6', label: '蓝' },
-  { value: '#111827', label: '黑' },
-  { value: '#f59e0b', label: '黄' }
-]
-
-const WIDTHS = [
-  { value: 3, label: '细' },
-  { value: 5, label: '中' },
-  { value: 9, label: '粗' }
-]
+/** Which settings panel is open, if any. */
+export type PopoverKind = 'pen' | 'eraser' | null
 
 interface PlayToolbarProps {
   tool: PlayTool
@@ -22,13 +13,19 @@ interface PlayToolbarProps {
   canUndo: boolean
   penColor: string
   penWidth: number
+  eraserSize: number
   visible: boolean
+  popover: PopoverKind
+  /** Hide the paging buttons when side navigation is in use. */
+  hidePaging?: boolean
   onTool: (tool: PlayTool) => void
+  onPopover: (kind: PopoverKind) => void
   onPrev: () => void
   onNext: () => void
   onToggleBoard: () => void
   onColor: (color: string) => void
   onWidth: (width: number) => void
+  onEraserSize: (size: number) => void
   onUndo: () => void
   onClear: () => void
   onEnd: () => void
@@ -37,11 +34,12 @@ interface PlayToolbarProps {
 /**
  * Floating playback toolbar.
  *
- * Hovering it pauses the auto-hide timer, so the toolbar cannot disappear while
- * the presenter is aiming at a button.
+ * The bar keeps a fixed height. Colour and width used to be inlined here, which made
+ * the bar grow and shift the paging buttons whenever the pen was selected; those now
+ * live in a panel that floats above the bar instead.
  */
 export function PlayToolbar(props: PlayToolbarProps) {
-  const { tool, boardOpen, canUndo, penColor, penWidth, visible } = props
+  const { tool, boardOpen, canUndo, penColor, penWidth, eraserSize, visible, popover } = props
 
   const items: Array<{ id: PlayTool; label: string; icon: ReactNode; testId: string }> = [
     { id: 'pointer', label: '指针', icon: <Pointer size={19} />, testId: 'tool-pointer' },
@@ -49,20 +47,45 @@ export function PlayToolbar(props: PlayToolbarProps) {
     { id: 'eraser', label: '橡皮', icon: <Eraser size={19} />, testId: 'tool-eraser' }
   ]
 
+  /**
+   * Selecting a tool also opens its panel; selecting it again closes the panel but
+   * keeps the tool, so the presenter can dismiss it without losing the pen.
+   */
+  const pickTool = (id: PlayTool): void => {
+    const panel = id === 'pen' ? 'pen' : id === 'eraser' ? 'eraser' : null
+    const sameTool = tool === id
+    props.onTool(id)
+    props.onPopover(panel !== null && sameTool && popover === panel ? null : panel)
+  }
+
   return (
-    <div
-      className="play-chrome"
-      data-visible={visible}
-      data-testid="play-toolbar"
-    >
-      <div className="tool-cluster">
-        <button type="button" className="tool-btn" title="上一页" aria-label="上一页" data-testid="tool-prev" onClick={props.onPrev}>
-          <ChevronLeft size={19} />
-        </button>
-        <button type="button" className="tool-btn" title="下一页" aria-label="下一页" data-testid="tool-next" onClick={props.onNext}>
-          <ChevronRight size={19} />
-        </button>
-        <span className="tool-sep" aria-hidden="true" />
+    <div className="play-chrome" data-visible={visible} data-testid="play-toolbar">
+      <div className="tool-cluster" style={{ position: 'relative' }}>
+        {props.hidePaging ? null : (
+          <>
+            <button
+              type="button"
+              className="tool-btn"
+              title="上一页"
+              aria-label="上一页"
+              data-testid="tool-prev"
+              onClick={props.onPrev}
+            >
+              <ChevronLeft size={19} />
+            </button>
+            <button
+              type="button"
+              className="tool-btn"
+              title="下一页"
+              aria-label="下一页"
+              data-testid="tool-next"
+              onClick={props.onNext}
+            >
+              <ChevronRight size={19} />
+            </button>
+            <span className="tool-sep" aria-hidden="true" />
+          </>
+        )}
 
         {items.map((item) => (
           <button
@@ -74,7 +97,7 @@ export function PlayToolbar(props: PlayToolbarProps) {
             aria-label={item.label}
             aria-pressed={tool === item.id}
             data-testid={item.testId}
-            onClick={() => props.onTool(item.id)}
+            onClick={() => pickTool(item.id)}
           >
             {item.icon}
           </button>
@@ -82,42 +105,10 @@ export function PlayToolbar(props: PlayToolbarProps) {
 
         <span className="tool-sep" aria-hidden="true" />
 
-        <div className="pen-swatches" data-testid="pen-swatches">
-          {COLORS.map((color) => (
-            <button
-              key={color.value}
-              type="button"
-              className="swatch"
-              data-active={penColor === color.value}
-              style={{ background: color.value }}
-              title={color.label}
-              aria-label={'画笔颜色 ' + color.label}
-              data-testid={'pen-color-' + color.label}
-              onClick={() => props.onColor(color.value)}
-            />
-          ))}
-          {WIDTHS.map((width) => (
-            <button
-              key={width.value}
-              type="button"
-              className="swatch swatch-width"
-              data-active={penWidth === width.value}
-              title={'粗细 ' + width.label}
-              aria-label={'画笔粗细 ' + width.label}
-              data-testid={'pen-width-' + width.label}
-              onClick={() => props.onWidth(width.value)}
-            >
-              <i style={{ height: width.value }} />
-            </button>
-          ))}
-        </div>
-
-        <span className="tool-sep" aria-hidden="true" />
-
         <button
           type="button"
           className="tool-btn"
-          title="撤销"
+          title="撤销（Ctrl+Z）"
           aria-label="撤销"
           data-testid="tool-undo"
           disabled={!canUndo}
@@ -125,7 +116,14 @@ export function PlayToolbar(props: PlayToolbarProps) {
         >
           <Undo size={19} />
         </button>
-        <button type="button" className="tool-btn" title="清空" aria-label="清空" data-testid="tool-clear" onClick={props.onClear}>
+        <button
+          type="button"
+          className="tool-btn"
+          title="清空（可撤销）"
+          aria-label="清空"
+          data-testid="tool-clear"
+          onClick={props.onClear}
+        >
           <Trash size={19} />
         </button>
 
@@ -143,6 +141,21 @@ export function PlayToolbar(props: PlayToolbarProps) {
         >
           <Board size={19} />
         </button>
+
+        <PenPopover
+          open={popover === 'pen'}
+          color={penColor}
+          width={penWidth}
+          onColor={props.onColor}
+          onWidth={props.onWidth}
+          onClose={() => props.onPopover(null)}
+        />
+        <EraserPopover
+          open={popover === 'eraser'}
+          size={eraserSize}
+          onSize={props.onEraserSize}
+          onClose={() => props.onPopover(null)}
+        />
       </div>
 
       <button

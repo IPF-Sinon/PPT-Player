@@ -224,3 +224,62 @@
   from { clip-path: inset(0 50% 0 50%); }
   to { clip-path: inset(0 0 0 0); }
 }
+
+/* ------------------------------------------------------------ exit animations */
+/* An exit effect needs its own keyframes. Reusing the entrance ones is what made a
+   cover block reappear: pptx-fade runs 0 -> 1, so an exiting element animated from
+   transparent back to opaque and, with fill-mode forwards, stayed opaque. */
+@keyframes pptx-exit-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes pptx-exit-fly-left {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-60px); }
+}
+
+@keyframes pptx-exit-fly-right {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(60px); }
+}
+
+@keyframes pptx-exit-fly-up {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-60px); }
+}
+
+@keyframes pptx-exit-fly-down {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(60px); }
+}
+
+@keyframes pptx-exit-wipe-left {
+  from { clip-path: inset(0 0 0 0); }
+  to { clip-path: inset(0 0 0 100%); }
+}
+
+@keyframes pptx-exit-wipe-right {
+  from { clip-path: inset(0 0 0 0); }
+  to { clip-path: inset(0 100% 0 0); }
+}
+
+@keyframes pptx-exit-wipe-up {
+  from { clip-path: inset(0 0 0 0); }
+  to { clip-path: inset(0 0 100% 0); }
+}
+
+@keyframes pptx-exit-wipe-down {
+  from { clip-path: inset(0 0 0 0); }
+  to { clip-path: inset(100% 0 0 0); }
+}
+
+@keyframes pptx-exit-zoom {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.6); }
+}
+
+@keyframes pptx-exit-spin {
+  from { opacity: 1; transform: rotate(0deg); }
+  to { opacity: 0; transform: rotate(180deg); }
+}

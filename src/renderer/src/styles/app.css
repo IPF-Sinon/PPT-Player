@@ -204,3 +204,13 @@ button:disabled {
   margin: 0;
   color: var(--text);
 }
+
+.sheet-select {
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-panel);
+  color: var(--text-strong);
+  font-size: 13px;
+}
