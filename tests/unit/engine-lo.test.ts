@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   buildConvertArgs,
@@ -12,6 +12,8 @@ import {
 const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
 
 function tempDir(): string {
+  // The scratch root is git-ignored, so it does not exist on a fresh checkout.
+  mkdirSync(scratchRoot, { recursive: true })
   return mkdtempSync(join(scratchRoot, 'lo-out-'))
 }
 

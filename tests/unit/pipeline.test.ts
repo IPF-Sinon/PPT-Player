@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { strToU8, zipSync } from 'fflate'
 import { openDeck, probeFile, reportDeckMetrics, type ConvertContext } from '../../src/main/convert/pipeline'
@@ -7,6 +7,8 @@ import { AppError } from '../../src/shared/errors'
 import type { EngineStatus } from '../../src/shared/types'
 
 const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
+// Git-ignored, so it does not exist on a fresh checkout.
+mkdirSync(scratchRoot, { recursive: true })
 
 const noEngine: EngineStatus = {
   available: false,

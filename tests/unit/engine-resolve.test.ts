@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { resolveLibreOffice } from '../../src/main/convert/engine-resolve'
 
 const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
+// Git-ignored, so it does not exist on a fresh checkout.
+mkdirSync(scratchRoot, { recursive: true })
 
 function fakeEngineRoot(): string {
   const root = mkdtempSync(join(scratchRoot, 'lo-root-'))

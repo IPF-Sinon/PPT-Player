@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { DeckCache, cacheKey } from '../../src/main/convert/cache'
 
 const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
+// Git-ignored, so it does not exist on a fresh checkout.
+mkdirSync(scratchRoot, { recursive: true })
 
 function tempRoot(): string {
   return mkdtempSync(join(scratchRoot, 'ppt-cache-test-'))
