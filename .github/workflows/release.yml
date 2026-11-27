@@ -142,7 +142,9 @@ jobs:
       - name: Write checksums
         shell: pwsh
         run: |
-          Copy-Item -Path dist-engine -Destination dist -Recurse -Force
+          # Copy the files themselves, not the folder: copying the directory would
+          # nest it as dist/dist-engine and the globs below would miss the engine zip.
+          Copy-Item -Path dist-engine/*.zip -Destination dist -Force
           $lines = Get-ChildItem -Path dist -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
