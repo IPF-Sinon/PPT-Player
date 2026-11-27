@@ -196,10 +196,88 @@ async function buildAnimated() {
   writeFileSync(join(outDir, 'deck-animated.pptx'), Buffer.from(zipSync(files)))
 }
 
+/**
+ * Deck with click-triggered answers.
+ *
+ * Two buttons, each revealing its own answer through an interactiveSeq. This is the
+ * "click the button for the matching explanation" pattern, and the fixture exists so
+ * the e2e suite can prove a trigger reveals only its own target.
+ */
+async function buildTriggers() {
+  const pptx = new PptxGenJS()
+  pptx.layout = 'LAYOUT_16x9'
+  const slide = pptx.addSlide()
+  slide.background = { color: 'FFFFFF' }
+  slide.addText('问题：本诗运用了什么手法？', {
+    x: 0.6, y: 0.5, w: 8.8, h: 0.8, fontSize: 24, bold: true, color: '1F3864'
+  })
+  slide.addShape('roundRect', {
+    x: 0.8, y: 1.7, w: 2.6, h: 0.8, fill: { color: '4472C4' }, line: { color: '2F528F' }
+  })
+  slide.addText('按钮 A', { x: 0.8, y: 1.7, w: 2.6, h: 0.8, fontSize: 16, color: 'FFFFFF', align: 'center', valign: 'middle' })
+  slide.addShape('roundRect', {
+    x: 0.8, y: 2.8, w: 2.6, h: 0.8, fill: { color: 'ED7D31' }, line: { color: 'C55A11' }
+  })
+  slide.addText('按钮 B', { x: 0.8, y: 2.8, w: 2.6, h: 0.8, fontSize: 16, color: 'FFFFFF', align: 'center', valign: 'middle' })
+  slide.addText('解析 A：以动衬静，以鸟鸣反衬山居之静。', {
+    x: 3.9, y: 1.7, w: 5.4, h: 0.8, fontSize: 15, color: '333333'
+  })
+  slide.addText('解析 B：借景抒情，以秋色寄托羁旅之愁。', {
+    x: 3.9, y: 2.8, w: 5.4, h: 0.8, fontSize: 15, color: '333333'
+  })
+
+  const buffer = await pptx.write({ outputType: 'nodebuffer' })
+  const files = unzipSync(new Uint8Array(buffer))
+  const slideKey = 'ppt/slides/slide1.xml'
+  const xml = strFromU8(files[slideKey])
+
+  /** Find the shape id that owns the given text. */
+  const idOf = (needle) => {
+    const at = xml.indexOf(needle)
+    if (at < 0) throw new Error('shape not found: ' + needle)
+    const ids = [...xml.slice(0, at).matchAll(/<p:cNvPr id="(\d+)"/g)]
+    return ids[ids.length - 1][1]
+  }
+
+  /** One interactive sequence: clicking triggerId reveals targetId. */
+  const interactive = (triggerId, targetId, seqId) =>
+    '<p:seq concurrent="1" nextAc="seek">' +
+    '<p:cTn id="' + seqId + '" nodeType="interactiveSeq" restart="whenNotActive">' +
+    '<p:stCondLst><p:cond evt="onClick" delay="0">' +
+    '<p:tgtEl><p:spTgt spid="' + triggerId + '"/></p:tgtEl></p:cond></p:stCondLst>' +
+    '<p:childTnLst>' +
+    '<p:par><p:cTn id="' + (seqId + 1) + '" presetID="1" presetClass="entr" fill="hold" nodeType="clickEffect">' +
+    '<p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>' +
+    '<p:par><p:cTn id="' + (seqId + 2) + '" presetID="10" presetClass="entr" fill="hold" nodeType="withEffect">' +
+    '<p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>' +
+    '<p:set><p:cBhvr><p:cTn id="' + (seqId + 3) + '" dur="1" fill="hold">' +
+    '<p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn>' +
+    '<p:tgtEl><p:spTgt spid="' + targetId + '"/></p:tgtEl>' +
+    '<p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst>' +
+    '</p:cBhvr><p:to><p:strVal val="visible"/></p:to></p:set>' +
+    '<p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="' + (seqId + 4) + '" dur="400"/>' +
+    '<p:tgtEl><p:spTgt spid="' + targetId + '"/></p:tgtEl></p:cBhvr></p:animEffect>' +
+    '</p:childTnLst></p:cTn></p:par>' +
+    '</p:childTnLst></p:cTn></p:par>' +
+    '</p:childTnLst></p:cTn></p:seq>'
+
+  const timing =
+    '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" nodeType="tmRoot"><p:childTnLst>' +
+    '<p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq">' +
+    '<p:childTnLst></p:childTnLst></p:cTn></p:seq>' +
+    interactive(idOf('按钮 A'), idOf('解析 A'), 30) +
+    interactive(idOf('按钮 B'), idOf('解析 B'), 50) +
+    '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+
+  files[slideKey] = strToU8(xml.replace('</p:sld>', timing + '</p:sld>'))
+  writeFileSync(join(outDir, 'deck-triggers.pptx'), Buffer.from(zipSync(files)))
+}
+
 await build16x9()
 await build4x3()
 await buildSmokePptx()
 await buildAnimated()
+await buildTriggers()
 buildSmokeOdp()
 
-console.log('[make-fixtures] wrote deck-16x9.pptx, deck-4x3.pptx, smoke.pptx, deck-animated.pptx, smoke.odp')
+console.log('[make-fixtures] wrote deck-16x9, deck-4x3, smoke, deck-animated, deck-triggers, smoke.odp')
