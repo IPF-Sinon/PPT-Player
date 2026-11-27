@@ -7,6 +7,7 @@ import type {
   AppSettings,
   BootstrapInfo,
   DeckInfo,
+  EngineDownloadProgress,
   EngineStatus,
   InkPage,
   NativeOpenResult,
@@ -14,6 +15,7 @@ import type {
   ProbeResult
 } from '../../shared/types'
 import { log, logPath } from '../log'
+import { app } from 'electron'
 import { loadSettings, saveSettings } from '../settings'
 import {
   closeDeck,
@@ -26,7 +28,8 @@ import {
   reportDeckMetrics,
   type ConvertContext
 } from '../convert/pipeline'
-import { engineStatus, resetEngineCache } from '../engine'
+import { downloadedEngineDir, engineStatus, engineWorkDir, resetEngineCache } from '../engine'
+import { downloadEngine } from '../convert/engine-download'
 import {
   deckIdSchema,
   inkPagesSchema,
@@ -37,6 +40,37 @@ import {
   settingsPatchSchema
 } from './schema'
 import { exitFullScreen, getPreviewWindow, isFullScreen } from '../windows'
+
+/** Metadata describing this build's engine packaging. */
+interface EngineMeta {
+  version: string
+  variant?: 'full' | 'lite'
+  engineZipUrl?: string
+  engineZipSha256?: string
+  engineZipBytes?: number
+}
+
+/**
+ * Read resources/engine.json.
+ *
+ * A missing or malformed file must not break the app: it only means the lite
+ * download cannot be offered, which is the right degradation for a full build.
+ */
+function readEngineMeta(): EngineMeta {
+  const candidates = [
+    join(process.resourcesPath ?? '', 'engine.json'),
+    join(app.getAppPath(), 'resources', 'engine.json')
+  ]
+  for (const path of candidates) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as EngineMeta
+      if (parsed && typeof parsed.version === 'string') return parsed
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return { version: 'unknown', variant: 'full' }
+}
 
 export interface HandlerDeps {
   ctx: ConvertContext
@@ -151,6 +185,58 @@ export function registerHandlers(deps: HandlerDeps): void {
     wrap((): Promise<EngineStatus> => {
       resetEngineCache()
       return engineStatus(true)
+    })
+  )
+
+  let engineAbort: AbortController | null = null
+
+  ipcMain.handle(IPC.engineVariant, () => wrap((): { variant: 'full' | 'lite'; engineBytes: number } => {
+    const meta = readEngineMeta()
+    return { variant: meta.variant === 'lite' ? 'lite' : 'full', engineBytes: meta.engineZipBytes ?? 0 }
+  }))
+
+  ipcMain.handle(IPC.engineDownload, (_e) =>
+    wrap(async (): Promise<{ ok: boolean; message: string }> => {
+      const meta = readEngineMeta()
+      if (!meta.engineZipUrl || !meta.engineZipSha256) {
+        return { ok: false, message: '当前版本未配置引擎下载地址' }
+      }
+      if (engineAbort) return { ok: false, message: '已有下载正在进行' }
+
+      engineAbort = new AbortController()
+      const send = (progress: EngineDownloadProgress): void => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send(IPC.engineDownloadProgress, progress)
+        }
+      }
+
+      try {
+        await downloadEngine({
+          url: meta.engineZipUrl,
+          sha256: meta.engineZipSha256,
+          bytes: meta.engineZipBytes ?? 0,
+          targetDir: downloadedEngineDir(),
+          workDir: engineWorkDir(),
+          onProgress: send,
+          signal: engineAbort.signal
+        })
+        // The cached status still says "missing", so force a fresh probe.
+        resetEngineCache()
+        await engineStatus(true)
+        return { ok: true, message: '兼容引擎已就绪' }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return { ok: false, message }
+      } finally {
+        engineAbort = null
+      }
+    })
+  )
+
+  ipcMain.handle(IPC.engineDownloadCancel, () =>
+    wrap((): void => {
+      engineAbort?.abort()
+      engineAbort = null
     })
   )
 

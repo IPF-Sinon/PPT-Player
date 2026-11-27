@@ -3,6 +3,7 @@ import type {
   BootstrapInfo,
   ConvertProgress,
   DeckInfo,
+  EngineDownloadProgress,
   EngineStatus,
   InkPage,
   NativeOpenResult,
@@ -23,6 +24,10 @@ export const IPC = {
   engineStatus: 'engine:status',
   engineRecheck: 'engine:recheck',
   engineSetLoPath: 'engine:set-lo-path',
+  engineVariant: 'engine:variant',
+  engineDownload: 'engine:download',
+  engineDownloadCancel: 'engine:download-cancel',
+  engineDownloadProgress: 'engine:download-progress',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   playEnter: 'play:enter',
@@ -63,6 +68,14 @@ export interface RendererApi {
   ): Promise<DeckInfo | null>
   onProgress(cb: (progress: ConvertProgress) => void): () => void
   engineStatus(): Promise<EngineStatus>
+  /** Download and install the compatibility engine. Resolves when it is usable. */
+  engineDownload(): Promise<{ ok: boolean; message: string }>
+  /** Cancel an in-flight engine download. */
+  engineDownloadCancel(): Promise<void>
+  /** Subscribe to download progress. Returns an unsubscribe function. */
+  onEngineDownload(cb: (progress: EngineDownloadProgress) => void): () => void
+  /** Whether this build ships the engine, so the UI knows to offer a download. */
+  engineVariant(): Promise<{ variant: 'full' | 'lite'; engineBytes: number }>
   recheckEngine(): Promise<EngineStatus>
   setLoPath(path: string): Promise<EngineStatus>
   getSettings(): Promise<AppSettings>

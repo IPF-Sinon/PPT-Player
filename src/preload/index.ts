@@ -5,6 +5,7 @@ import type {
   BootstrapInfo,
   ConvertProgress,
   DeckInfo,
+  EngineDownloadProgress,
   EngineStatus,
   InkPage,
   NativeOpenResult,
@@ -28,6 +29,18 @@ const api: RendererApi = {
     return () => ipcRenderer.removeListener(IPC.deckProgress, listener)
   },
   engineStatus: (): Promise<EngineStatus> => ipcRenderer.invoke(IPC.engineStatus),
+  engineDownload: (): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IPC.engineDownload),
+  engineDownloadCancel: (): Promise<void> => ipcRenderer.invoke(IPC.engineDownloadCancel),
+  engineVariant: (): Promise<{ variant: 'full' | 'lite'; engineBytes: number }> =>
+    ipcRenderer.invoke(IPC.engineVariant),
+  onEngineDownload: (cb: (progress: EngineDownloadProgress) => void) => {
+    const listener = (_e: unknown, progress: EngineDownloadProgress): void => cb(progress)
+    ipcRenderer.on(IPC.engineDownloadProgress, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.engineDownloadProgress, listener)
+    }
+  },
   recheckEngine: (): Promise<EngineStatus> => ipcRenderer.invoke(IPC.engineRecheck),
   setLoPath: (path: string): Promise<EngineStatus> => ipcRenderer.invoke(IPC.engineSetLoPath, { path }),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.settingsGet),

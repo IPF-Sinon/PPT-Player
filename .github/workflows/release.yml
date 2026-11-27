@@ -75,23 +75,66 @@ jobs:
 
       - run: pnpm build
 
-      - name: Package
+      # The engine zip is a release asset in its own right: the lite build downloads
+      # it on demand, so its checksum has to be known before the lite package is built.
+      - name: Build standalone engine archive
+        shell: pwsh
+        run: |
+          $loVersion = (Get-Content resources/engine.json -Raw | ConvertFrom-Json).version
+          $zipName = "PPTPlayer-Engine-$loVersion-win-x64.zip"
+          New-Item -ItemType Directory -Force -Path dist-engine | Out-Null
+          Compress-Archive -Path resources/lo/* -DestinationPath "dist-engine/$zipName" -CompressionLevel Optimal
+          $zip = Get-Item "dist-engine/$zipName"
+          $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "engine zip: $($zip.Name) $([math]::Round($zip.Length/1MB,1)) MB"
+          "ENGINE_ZIP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ENGINE_ZIP_BYTES=$($zip.Length)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if ($zip.Length -gt 170MB) { throw "engine zip too large: $([math]::Round($zip.Length/1MB,1)) MB" }
+
+      - name: Package full build
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis zip --x64 --publish never
+        run: |
+          node scripts/set-variant.mjs full
+          npx electron-builder --config electron-builder.yml --win nsis zip --x64 --publish never
+
+      - name: Package lite build
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/set-variant.mjs lite
+          npx electron-builder --config electron-builder.lite.yml --win nsis zip --x64 --publish never
 
       - name: Verify artifacts
         shell: pwsh
         run: |
           Get-ChildItem -Path dist -File | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
-          $setup = Get-ChildItem -Path dist -Filter 'PPTPlayer-Setup-*.exe' | Select-Object -First 1
-          if ($null -eq $setup) { throw 'NSIS installer missing' }
-          if ($setup.Length -gt 600MB) { throw "installer too large: $([math]::Round($setup.Length/1MB,1)) MB, budget is 600 MB" }
+          $full = Get-ChildItem -Path dist -Filter 'PPTPlayer-Setup-*-full.exe' | Select-Object -First 1
+          if ($null -eq $full) { throw 'full NSIS installer missing' }
+          if ($full.Length -gt 600MB) { throw "full installer too large: $([math]::Round($full.Length/1MB,1)) MB" }
+
+          $lite = Get-ChildItem -Path dist -Filter 'PPTPlayer-Setup-*-lite.exe' | Select-Object -First 1
+          if ($null -eq $lite) { throw 'lite NSIS installer missing' }
+          $liteMb = [math]::Round($lite.Length/1MB,1)
+          Write-Host "lite installer: $liteMb MB"
+          # The lite build exists to be small; if it creeps past this budget the engine
+          # is being bundled again and the whole point is lost.
+          if ($lite.Length -gt 95MB) { throw "lite installer too large: $liteMb MB, budget is 95 MB" }
+
+          $liteZip = Get-ChildItem -Path dist -Filter 'PPTPlayer-*-x64-lite.zip' | Select-Object -First 1
+          if ($null -eq $liteZip) { throw 'lite zip missing' }
+          Expand-Archive -Path $liteZip.FullName -DestinationPath "${{ runner.temp }}\lite-check" -Force
+          if (Test-Path "${{ runner.temp }}\lite-check\resources\lo") {
+            throw 'lite package still contains resources/lo'
+          }
+          Write-Host 'lite package verified: no bundled engine'
 
       - name: Write checksums
         shell: pwsh
         run: |
+          Copy-Item -Path dist-engine -Destination dist -Recurse -Force
           $lines = Get-ChildItem -Path dist -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"

@@ -13,7 +13,19 @@ export function bundledEngineRoots(): string[] {
   if (fromEnv) roots.push(fromEnv)
   if (process.resourcesPath) roots.push(join(process.resourcesPath, 'lo'))
   roots.push(join(app.getAppPath(), 'resources', 'lo'))
+  // The lite build ships without the engine; a downloaded copy lands here.
+  roots.push(downloadedEngineDir())
   return roots
+}
+
+/** Where the lite build unpacks an engine fetched on demand. */
+export function downloadedEngineDir(): string {
+  return join(app.getPath('userData'), 'engine', 'lo')
+}
+
+/** Scratch space for the download and extraction. */
+export function engineWorkDir(): string {
+  return join(app.getPath('userData'), 'engine')
 }
 
 /**

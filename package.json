@@ -21,7 +21,9 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test",
-    "package": "npm run build && electron-builder --win nsis zip --x64 --publish never",
+    "package": "npm run build && node scripts/set-variant.mjs full && electron-builder --config electron-builder.yml --win nsis zip --x64 --publish never",
+    "package:full": "npm run build && node scripts/set-variant.mjs full && electron-builder --config electron-builder.yml --win nsis zip --x64 --publish never",
+    "package:lite": "npm run build && node scripts/set-variant.mjs lite && electron-builder --config electron-builder.lite.yml --win nsis zip --x64 --publish never",
     "fixtures": "node scripts/make-fixtures.mjs"
   },
   "devDependencies": {

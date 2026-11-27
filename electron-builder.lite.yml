@@ -1,0 +1,66 @@
+# Lite build: identical to the full build except the engine is not bundled.
+# The app downloads it on demand into userData/engine/lo the first time a legacy
+# format or compatible mode is used, which is why this package is far smaller.
+appId: com.polarnight.pptplayer
+productName: PPT Player
+copyright: Copyright © 2026 PolarNight
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  # Only the metadata ships; the engine itself is fetched at runtime.
+  - from: resources/engine.json
+    to: engine.json
+asar: true
+compression: maximum
+asarUnpack:
+  - '**/*.node'
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  icon: resources/icon.ico
+  artifactName: PPTPlayer-${version}-x64-lite.${ext}
+  executableName: PPTPlayer
+  fileAssociations:
+    - ext: ppt
+      name: PowerPoint Presentation
+      role: Viewer
+    - ext: pptx
+      name: PowerPoint Presentation
+      role: Viewer
+    - ext: pptm
+      name: PowerPoint Macro-enabled Presentation
+      role: Viewer
+    - ext: pps
+      name: PowerPoint Show
+      role: Viewer
+    - ext: ppsx
+      name: PowerPoint Show
+      role: Viewer
+    - ext: ppsm
+      name: PowerPoint Macro-enabled Show
+      role: Viewer
+    - ext: potx
+      name: PowerPoint Template
+      role: Viewer
+    - ext: odp
+      name: OpenDocument Presentation
+      role: Viewer
+    - ext: pdf
+      name: PDF Document
+      role: Viewer
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: PPT 放映器
+  artifactName: PPTPlayer-Setup-${version}-x64-lite.${ext}
+  deleteAppDataOnUninstall: false

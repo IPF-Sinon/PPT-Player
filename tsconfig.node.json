@@ -40,6 +40,8 @@
     "tests/unit/pptx-animations.test.ts",
     "tests/unit/pptx-parse.test.ts",
     "tests/unit/pptx-animated-fixture.test.ts",
-    "tests/unit/tabs.test.ts"
+    "tests/unit/tabs.test.ts",
+    "tests/unit/pptx-motion.test.ts",
+    "tests/unit/pptx-trigger-eval.test.ts"
   ]
 }

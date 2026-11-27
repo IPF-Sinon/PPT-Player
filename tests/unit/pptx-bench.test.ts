@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import PptxGenJS from 'pptxgenjs'
 import { openZipVfs } from '../../src/main/pptx/zip-vfs'
 import { buildPresentationIndex } from '../../src/main/pptx/index-parse'
@@ -14,7 +13,10 @@ import { buildPresentationIndex } from '../../src/main/pptx/index-parse'
  * enough to catch a regression to "read the whole file".
  */
 describe('native open cost', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'pptx-bench-'))
+  // /tmp is a small tmpfs here and this fixture is deliberately large.
+  const scratch = join(process.cwd(), '.cache', 'test-scratch')
+  mkdirSync(scratch, { recursive: true })
+  const dir = mkdtempSync(join(scratch, 'pptx-bench-'))
   const smallPath = join(dir, 'small.pptx')
   const bigPath = join(dir, 'big.pptx')
 

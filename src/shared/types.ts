@@ -67,6 +67,16 @@ export type EngineStatus = {
   detail: string
 }
 
+/** Progress of an on-demand engine download. */
+export interface EngineDownloadProgress {
+  stage: 'downloading' | 'verifying' | 'extracting' | 'done' | 'error'
+  receivedBytes: number
+  totalBytes: number
+  /** 0..1, or -1 when the server did not report a length. */
+  ratio: number
+  message: string
+}
+
 export interface AppSettings {
   /** Explicit soffice path override, empty means auto. */
   loPathOverride: string

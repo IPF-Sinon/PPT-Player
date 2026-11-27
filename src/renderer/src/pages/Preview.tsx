@@ -11,6 +11,7 @@ import { PptxSlideView } from '../components/PptxSlideView'
 import { TabBar } from '../components/TabBar'
 import { ChevronDown, ChevronUp, Close, Folder, Play, Settings } from '../components/icons'
 import { SettingsSheet } from '../components/Sheets'
+import { EngineDownloadModal } from '../components/EngineDownloadModal'
 import '../styles/preview.css'
 import '../styles/pptx.css'
 
@@ -21,6 +22,8 @@ export default function PreviewPage() {
   const [recent, setRecent] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** Set when the lite build needs the engine to open the requested file. */
+  const [enginePrompt, setEnginePrompt] = useState<{ bytes: number; retry: () => void } | null>(null)
   const queue = useMemo(() => new RenderQueue(), [])
   const openToken = useRef(0)
 
@@ -143,6 +146,14 @@ export default function PreviewPage() {
         const result = await window.api.open(filePath)
         if (token !== openToken.current) return
         if (!result.ok) {
+          // The lite build has no engine; offer to fetch it instead of failing.
+          const status = await window.api.engineStatus()
+          const variant = await window.api.engineVariant()
+          if (!status.available && variant.variant === 'lite') {
+            update(tabId, { status: 'error', error: { message: '需要兼容引擎才能打开该格式' } })
+            setEnginePrompt({ bytes: variant.engineBytes, retry: () => void openFile(filePath) })
+            return
+          }
           update(tabId, { status: 'error', error: { message: result.error.message, detail: result.error.detail } })
           return
         }
@@ -175,6 +186,13 @@ export default function PreviewPage() {
         const result = await window.api.open(tab.filePath)
         if (token !== openToken.current) return
         if (!result.ok) {
+          const status = await window.api.engineStatus()
+          const variant = await window.api.engineVariant()
+          if (!status.available && variant.variant === 'lite') {
+            update(tab.tabId, { status: 'error', error: { message: '需要兼容引擎才能使用兼容模式' } })
+            setEnginePrompt({ bytes: variant.engineBytes, retry: () => void switchEngine('libreoffice') })
+            return
+          }
           update(tab.tabId, { status: 'error', error: { message: result.error.message } })
           return
         }
@@ -552,6 +570,17 @@ export default function PreviewPage() {
           </button>
         </div>
       </footer>
+
+      <EngineDownloadModal
+        open={enginePrompt !== null}
+        engineBytes={enginePrompt?.bytes ?? 0}
+        onClose={() => setEnginePrompt(null)}
+        onInstalled={() => {
+          const retry = enginePrompt?.retry
+          setEnginePrompt(null)
+          retry?.()
+        }}
+      />
 
       <SettingsSheet
         open={settingsOpen}
