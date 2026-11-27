@@ -109,8 +109,6 @@ interface NativeThumbProps {
  * scaling on the compositor.
  */
 function NativeThumb({ deckId, slide, pageNumber, active, onSelect }: NativeThumbProps) {
-  const scale = slide ? THUMB_WIDTH / slide.size.width : 1
-
   return (
     <button
       type="button"
@@ -122,16 +120,8 @@ function NativeThumb({ deckId, slide, pageNumber, active, onSelect }: NativeThum
       aria-current={active ? 'true' : undefined}
     >
       <span className="rail-index">{pageNumber}</span>
-      <div className="rail-native" style={{ width: THUMB_WIDTH, height: slide ? slide.size.height * scale : 112 }}>
-        {slide ? (
-          <div
-            className="pptx-scale"
-            style={{ transform: 'scale(' + scale + ')', width: slide.size.width, height: slide.size.height }}
-            data-deck={deckId}
-          >
-            <PptxSlideView slide={slide} step={0} showAll />
-          </div>
-        ) : null}
+      <div className="rail-native" style={{ width: THUMB_WIDTH, height: slide ? (THUMB_WIDTH * slide.size.height) / slide.size.width : 112 }} data-deck={deckId}>
+        {slide ? <PptxSlideView slide={slide} step={0} showAll fit /> : null}
       </div>
     </button>
   )

@@ -316,9 +316,7 @@ export default function PlaybackPage() {
           style={{ ['--slide-ratio' as string]: String(ratio) }}
         >
           {isNative && slide ? (
-            <div className="pptx-fit">
-              <PptxSlideView slide={slide} step={step} />
-            </div>
+            <PptxSlideView slide={slide} step={step} fit />
           ) : (
             <canvas ref={canvasRef} data-testid="playback-canvas" />
           )}

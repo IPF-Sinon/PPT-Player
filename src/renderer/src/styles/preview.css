@@ -551,3 +551,34 @@
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
 }
+/* ------------------------------------------------------- preview stage wrapper */
+/* The stage must be a sized flex child so the slide can be scaled into it. Without
+   this the native slide keeps its authored 960x540 box, overflows the window and
+   pushes the action buttons off screen. */
+.stage-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 24px;
+  background: var(--bg-stage);
+}
+
+.stage-wrap > .pptx-stage {
+  width: 100%;
+  height: 100%;
+}
+
+/* Scale a native slide down to fit the stage without changing its layout. */
+.stage-wrap .pptx-slide {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.stage-wrap > .pptx-slide {
+  transform-origin: center center;
+}

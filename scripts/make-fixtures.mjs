@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { strToU8, zipSync } from 'fflate'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import PptxGenJS from 'pptxgenjs'
 
 const outDir = join(process.cwd(), 'tests', 'fixtures')
@@ -132,9 +132,74 @@ function buildSmokeOdp() {
   writeFileSync(join(outDir, 'smoke.odp'), Buffer.from(zip))
 }
 
+/**
+ * Deck with click animations, built by post-processing a generated file.
+ *
+ * pptxgenjs cannot author animations, so the slide XML gets a p:timing tree injected
+ * afterwards. The shape shape mirrors a real PowerPoint export, which is what the
+ * animation parser is written against.
+ */
+async function buildAnimated() {
+  const pptx = new PptxGenJS()
+  pptx.layout = 'LAYOUT_16x9'
+  const slide = pptx.addSlide()
+  slide.background = { color: 'FFFFFF' }
+  slide.addText('问题：本诗运用了什么手法？', {
+    x: 0.8, y: 0.6, w: 8.4, h: 0.9, fontSize: 26, bold: true, color: '1F3864'
+  })
+  // The text is what the animation targets are located by, so the values are not
+  // captured; only the generated XML matters.
+  slide.addText('答案一：以动衬静', { x: 1.2, y: 2.0, w: 7, h: 0.8, fontSize: 20, color: '333333' })
+  slide.addText('答案二：借景抒情', { x: 1.2, y: 3.0, w: 7, h: 0.8, fontSize: 20, color: '333333' })
+  slide.addText('答案三：虚实结合', { x: 1.2, y: 4.0, w: 7, h: 0.8, fontSize: 20, color: '333333' })
+
+  const buffer = await pptx.write({ outputType: 'nodebuffer' })
+  const files = unzipSync(new Uint8Array(buffer))
+  const slideKey = 'ppt/slides/slide1.xml'
+  const xml = strFromU8(files[slideKey])
+
+  // Shape ids come from the generated file, so the animation targets the real ones.
+  const idOf = (needle) => {
+    const at = xml.indexOf(needle)
+    if (at < 0) throw new Error('shape not found: ' + needle)
+    const before = xml.slice(0, at)
+    const ids = [...before.matchAll(/<p:cNvPr id="(\d+)"/g)]
+    return ids[ids.length - 1][1]
+  }
+
+  const reveal = (id) =>
+    '<p:par><p:cTn id="5" presetID="1" presetClass="entr" fill="hold" nodeType="clickEffect">' +
+    '<p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>' +
+    '<p:par><p:cTn id="6" presetID="10" presetClass="entr" fill="hold" nodeType="withEffect">' +
+    '<p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>' +
+    '<p:set><p:cBhvr><p:cTn id="7" dur="1" fill="hold">' +
+    '<p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn>' +
+    '<p:tgtEl><p:spTgt spid="' + id + '"/></p:tgtEl>' +
+    '<p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst>' +
+    '</p:cBhvr><p:to><p:strVal val="visible"/></p:to></p:set>' +
+    '<p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="8" dur="400"/>' +
+    '<p:tgtEl><p:spTgt spid="' + id + '"/></p:tgtEl></p:cBhvr></p:animEffect>' +
+    '</p:childTnLst></p:cTn></p:par>' +
+    '</p:childTnLst></p:cTn></p:par>'
+
+  const timing =
+    '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" nodeType="tmRoot"><p:childTnLst>' +
+    '<p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq">' +
+    '<p:childTnLst>' +
+    reveal(idOf('答案一')) + reveal(idOf('答案二')) + reveal(idOf('答案三')) +
+    '</p:childTnLst></p:cTn></p:seq>' +
+    '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+
+  // p:timing must follow p:cSld and precede p:extLst in the schema order.
+  const withTiming = xml.replace('</p:sld>', timing + '</p:sld>')
+  files[slideKey] = strToU8(withTiming)
+  writeFileSync(join(outDir, 'deck-animated.pptx'), Buffer.from(zipSync(files)))
+}
+
 await build16x9()
 await build4x3()
 await buildSmokePptx()
+await buildAnimated()
 buildSmokeOdp()
 
-console.log('[make-fixtures] wrote deck-16x9.pptx, deck-4x3.pptx, smoke.pptx, smoke.odp')
+console.log('[make-fixtures] wrote deck-16x9.pptx, deck-4x3.pptx, smoke.pptx, deck-animated.pptx, smoke.odp')

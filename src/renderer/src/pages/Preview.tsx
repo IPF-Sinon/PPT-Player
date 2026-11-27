@@ -385,7 +385,13 @@ export default function PreviewPage() {
         <div className="stage-wrap">
           {tab && tab.status === 'ready' ? (
             isNative && currentSlide ? (
-              <PptxSlideView slide={currentSlide} step={0} showAll onDoubleClick={() => void startShow()} />
+              <PptxSlideView
+                slide={currentSlide}
+                step={0}
+                showAll
+                fit
+                onDoubleClick={() => void startShow()}
+              />
             ) : tab.pdfDoc ? (
               <SlideStage
                 doc={tab.pdfDoc}
