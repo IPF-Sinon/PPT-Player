@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>PPTPlayer Spike</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0;
+        font: 13px/1.6 system-ui, "Segoe UI", sans-serif;
+        background: #f3f4f6;
+        color: #111827;
+      }
+      .wrap { padding: 18px 22px 40px; }
+      h1 { font-size: 15px; margin: 0 0 4px; }
+      .hint { color: #6b7280; margin: 0 0 18px; }
+
+      /* The measurements the decision rests on. */
+      .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+      .card {
+        flex: 1 1 200px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+      }
+      .card b { display: block; font-size: 11px; color: #6b7280; font-weight: 500; }
+      .card span { font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; }
+      .ok { color: #047857; }
+      .bad { color: #b91c1c; }
+
+      /* A translucent blurred bar, the thing that must look right on WebView2. */
+      .toolbar {
+        position: relative;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 12px;
+        margin-bottom: 18px;
+        border-radius: 14px;
+        background: rgba(20, 24, 32, 0.55);
+        backdrop-filter: blur(18px) saturate(1.4);
+        color: #f8fafc;
+      }
+      .toolbar i {
+        width: 26px; height: 26px; border-radius: 8px;
+        background: rgba(255,255,255,0.16);
+      }
+
+      /* A slide mock: the PPTX rendering stand-in. */
+      .stage {
+        position: relative;
+        width: 640px; height: 360px;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+      }
+      .stage .title { position: absolute; left: 32px; top: 26px; font-size: 22px; font-weight: 700; }
+      .stage .body { position: absolute; left: 32px; top: 78px; font-size: 15px; color: #374151; }
+      .stage .cover {
+        position: absolute; left: 24px; top: 62px; width: 420px; height: 84px;
+        background: #e8eef9; border-radius: 4px;
+      }
+      .stage canvas { position: absolute; inset: 0; }
+      .row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+      pre { margin: 0; font-size: 11px; color: #4b5563; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>PPTPlayer Tauri Spike</h1>
+      <p class="hint">只回答三件事：冷启动耗时、WebView2 渲染、Range 206 流式读取。</p>
+
+      <div class="cards">
+        <div class="card">
+          <b>首帧可见（进程启动起算）</b>
+          <span id="paint">测量中…</span>
+        </div>
+        <div class="card">
+          <b>Range 206</b>
+          <span id="range">测量中…</span>
+        </div>
+        <div class="card">
+          <b>WebView2</b>
+          <span id="wv" style="font-size:12px">…</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <i></i><i></i><i></i><i></i><i></i>
+        <span style="margin-left:auto;font-size:11px;opacity:.8">backdrop-filter 半透明</span>
+      </div>
+
+      <div class="row">
+        <div class="stage">
+          <div class="title">问题：本诗的手法？</div>
+          <div class="cover"></div>
+          <div class="body">答案：以动衬静</div>
+          <canvas id="ink" width="640" height="360"></canvas>
+        </div>
+        <pre id="log"></pre>
+      </div>
+    </div>
+
+    <script type="module">
+      const log = (m) => {
+        const el = document.getElementById('log')
+        el.textContent += m + '\n'
+      }
+
+      // The measurement ends at the first painted frame, not at script execution:
+      // what the user perceives is the frame, so that is what gets reported.
+      const firstFrame = () =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve))
+        })
+
+      /**
+       * Ask the custom protocol for a byte range and check the response.
+       *
+       * The URL shape is platform-specific and this is exactly the kind of thing the
+       * spike exists to pin down: Windows serves custom schemes over http on a
+       * .localhost host, while other platforms use scheme://localhost. Both are
+       * tried so the measurement reports which one works rather than failing blind.
+       */
+      async function probeRange() {
+        const candidates = [
+          'http://deck.localhost/deck.pdf',
+          'deck://localhost/deck.pdf'
+        ]
+        for (const url of candidates) {
+          try {
+            const response = await fetch(url, { headers: { Range: 'bytes=0-1023' } })
+            const buf = await response.arrayBuffer()
+            const contentRange = response.headers.get('Content-Range') || '(none)'
+            const ok = response.status === 206 && buf.byteLength > 0
+            log('range ' + url + ' -> status=' + response.status + ' len=' + buf.byteLength +
+              ' content-range=' + contentRange)
+            if (ok || response.status === 200) {
+              return { ok, bytes: buf.byteLength, status: response.status, contentRange, url }
+            }
+          } catch (err) {
+            log('range ' + url + ' failed: ' + err)
+          }
+        }
+        return { ok: false, bytes: 0, status: 0, contentRange: '(error)', url: '(none)' }
+      }
+
+      /** Draw a stroke so canvas ink can be eyeballed and measured. */
+      function drawInk() {
+        const canvas = document.getElementById('ink')
+        const ctx = canvas.getContext('2d')
+        ctx.strokeStyle = '#ef4444'
+        ctx.lineWidth = 3
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.moveTo(60, 250)
+        ctx.bezierCurveTo(160, 190, 260, 320, 380, 250)
+        ctx.stroke()
+        return ctx.getImageData(0, 0, canvas.width, canvas.height).data.filter((v, i) => i % 4 === 3 && v > 0).length
+      }
+
+      async function main() {
+        const inked = drawInk()
+        log('ink pixels=' + inked)
+
+        const range = await probeRange()
+        document.getElementById('range').textContent = range.ok ? '206 OK' : 'FAIL ' + range.status
+        document.getElementById('range').className = range.ok ? 'ok' : 'bad'
+
+        const webview = (navigator.userAgent.match(/Edg\/[\d.]+/) || ['unknown'])[0]
+        document.getElementById('wv').textContent = webview
+
+        await firstFrame()
+
+        // Report and display the paint time.
+        let elapsed = 0
+        try {
+          elapsed = await window.__TAURI__.core.invoke('report_painted', {
+            report: { range_bytes: range.bytes, range_ok: range.ok, webview }
+          })
+        } catch (err) {
+          log('report failed: ' + err)
+          elapsed = Math.round(performance.now())
+        }
+
+        const paintEl = document.getElementById('paint')
+        paintEl.textContent = elapsed + ' ms'
+        paintEl.className = elapsed > 0 && elapsed < 400 ? 'ok' : 'bad'
+        log('painted_ms=' + elapsed)
+
+        // Machine-readable line the CI harness scrapes.
+        const summary = { painted_ms: elapsed, range_ok: range.ok, range_status: range.status, range_bytes: range.bytes, webview, ink_pixels: inked }
+        const line = document.createElement('div')
+        line.id = 'summary'
+        line.textContent = 'SPIKE_RESULT ' + JSON.stringify(summary)
+        line.style.display = 'none'
+        document.body.appendChild(line)
+        document.title = 'spike-ready'
+      }
+
+      main()
+    </script>
+  </body>
+</html>
