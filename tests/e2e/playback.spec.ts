@@ -300,9 +300,15 @@ test('12. the whiteboard opens, takes ink, and closes with Escape', async () => 
 })
 
 test('13. leaving playback returns to preview in the same window', async () => {
+  // An earlier test drew ink, so the end button asks about the annotations first.
+  // That question is the feature; this test is about the window transition.
   await win.getByTestId('tool-end').click({ timeout: 5000 }).catch(async () => {
     await win.keyboard.press('Escape')
   })
+  const dialog = win.getByTestId('exit-ink-dialog')
+  if (await dialog.isVisible().catch(() => false)) {
+    await win.getByTestId('exit-ink-keep').click()
+  }
   await expect.poll(async () => isFullScreen(), { timeout: 30_000 }).toBe(false)
   await expect(win.getByTestId('preview-page')).toBeVisible()
   // Still one window, and the deck is still mounted: nothing was reloaded.
