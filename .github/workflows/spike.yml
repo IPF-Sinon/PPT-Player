@@ -40,22 +40,22 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin
             spike/src-tauri/target
-          key: spike-cargo-${{ hashFiles('spike/src-tauri/Cargo.toml', 'spike/src-tauri/build.rs') }}
-          restore-keys: spike-cargo-
+          # The CLI is expensive and does not change with our manifest, so it gets a
+          # stable key of its own; only the crate build is keyed on the manifest.
+          key: spike-cargo-v1-${{ hashFiles('spike/src-tauri/Cargo.toml', 'spike/src-tauri/build.rs') }}
+          restore-keys: |
+            spike-cargo-v1-
+            spike-cargo-
 
-      # The prebuilt-binary action fails on this image (cargo-binstall cannot start
-      # bash), so the CLI is built from source and then cached: the expensive part is
-      # paid once rather than on every run.
+      # The CLI ships as an npm package with a prebuilt binary. Building it from source
+      # cost about twelve minutes per run, and cargo-binstall does not start on this
+      # image, so the npm package is the reliable path.
       - name: Install Tauri CLI
         shell: pwsh
         run: |
-          if (Test-Path "$env:USERPROFILE\.cargo\bin\cargo-tauri.exe") {
-            Write-Host "tauri-cli already cached"
-          } else {
-            cargo install tauri-cli --version "^2" --locked
-            if ($LASTEXITCODE -ne 0) { throw "tauri-cli install failed" }
-          }
-          cargo tauri --version
+          npm install --no-save @tauri-apps/cli@2
+          if ($LASTEXITCODE -ne 0) { throw "tauri cli install failed" }
+          npx tauri --version
 
       - name: Stage a PDF for the range probe
         shell: pwsh
@@ -88,7 +88,7 @@ jobs:
         shell: pwsh
         working-directory: spike
         run: |
-          cargo tauri build --bundles nsis 2>&1 | Tee-Object -FilePath ../spike-package.log
+          npx tauri build --bundles nsis 2>&1 | Tee-Object -FilePath ../spike-package.log
           if ($LASTEXITCODE -ne 0) { Get-Content ../spike-package.log -Tail 60; throw "tauri build failed" }
           Get-ChildItem -Recurse -Include *.exe -Path src-tauri/target/release/bundle | ForEach-Object {
             Write-Host ("installer: {0} = {1:N1} MB" -f $_.Name, ($_.Length / 1MB))
