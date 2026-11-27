@@ -18,6 +18,31 @@ use tauri::{Manager, UriSchemeContext, WebviewUrl, WebviewWindowBuilder};
 /// When the process started. The first thing that happens, so the number is honest.
 static START: Mutex<Option<Instant>> = Mutex::new(None);
 
+/// A few checkpoints along the startup path, so a slow number can be attributed
+/// rather than guessed at: webview creation, page load, and paint.
+static MARK_WINDOW: Mutex<Option<u128>> = Mutex::new(None);
+static MARK_PAGE_LOADED: Mutex<Option<u128>> = Mutex::new(None);
+
+fn since_start() -> u128 {
+    START
+        .lock()
+        .ok()
+        .and_then(|s| *s)
+        .map(|s| s.elapsed().as_millis())
+        .unwrap_or(0)
+}
+
+/// Called from the page's DOMContentLoaded, which separates webview startup from
+/// page execution.
+#[tauri::command]
+fn mark_page_loaded() -> u128 {
+    let ms = since_start();
+    if let Ok(mut slot) = MARK_PAGE_LOADED.lock() {
+        *slot = Some(ms);
+    }
+    ms
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SpikeReport {
     /// Bytes the frontend actually received through the range request.
@@ -44,6 +69,9 @@ fn report_painted(report: SpikeReport) -> Result<u128, String> {
         elapsed, report.range_ok, report.range_bytes, report.webview
     );
     eprintln!("[spike] notes: {}", report.notes);
+    let window = MARK_WINDOW.lock().ok().and_then(|m| *m).unwrap_or(0);
+    let loaded = MARK_PAGE_LOADED.lock().ok().and_then(|m| *m).unwrap_or(0);
+    eprintln!("[spike] timeline: window_created={window}ms page_loaded={loaded}ms painted={elapsed}ms");
     Ok(elapsed)
 }
 
@@ -52,6 +80,19 @@ fn report_painted(report: SpikeReport) -> Result<u128, String> {
 /// This is the piece worth measuring: if 206 with a correct Content-Range does not
 /// work here, the compatible engine cannot stream and the migration is dead.
 fn serve_with_range(path: &std::path::Path, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+    // A range request with an extra header triggers a preflight; answering it is what
+    // lets the real request through.
+    if request.method() == tauri::http::Method::OPTIONS {
+        return Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, HEAD, OPTIONS")
+            .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Range")
+            .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "Content-Range, Accept-Ranges")
+            .body(Vec::new())
+            .unwrap_or_default();
+    }
+
     let mut file = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(err) => {
@@ -105,6 +146,8 @@ fn serve_with_range(path: &std::path::Path, request: &Request<Vec<u8>>) -> Respo
                 .header(header::ACCEPT_RANGES, "bytes")
                 .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}"))
                 .header(header::CONTENT_LENGTH, read.to_string())
+                .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "Content-Range, Accept-Ranges")
                 .body(buf)
                 .unwrap_or_default()
         }
@@ -116,6 +159,8 @@ fn serve_with_range(path: &std::path::Path, request: &Request<Vec<u8>>) -> Respo
                 .header(header::CONTENT_TYPE, "application/pdf")
                 .header(header::ACCEPT_RANGES, "bytes")
                 .header(header::CONTENT_LENGTH, total.to_string())
+                .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "Content-Range, Accept-Ranges")
                 .body(buf)
                 .unwrap_or_default()
         }
@@ -144,7 +189,7 @@ pub fn run() {
                 .unwrap_or_default();
             serve_with_range(&path, &request)
         })
-        .invoke_handler(tauri::generate_handler![report_painted])
+        .invoke_handler(tauri::generate_handler![report_painted, mark_page_loaded])
         .setup(move |app| {
             // The window is created here so the whole startup path stays in view.
             if app.get_webview_window("main").is_none() {
@@ -152,6 +197,10 @@ pub fn run() {
                     .title("PPTPlayer Spike")
                     .inner_size(1100.0, 760.0)
                     .build()?;
+                if let Ok(mut slot) = MARK_WINDOW.lock() {
+                    *slot = Some(since_start());
+                }
+                eprintln!("[spike] window created at {}ms", since_start());
             }
 
             if !source_pdf.is_empty() {

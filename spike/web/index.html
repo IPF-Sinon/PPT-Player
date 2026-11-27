@@ -112,6 +112,12 @@
 
       // The measurement ends at the first painted frame, not at script execution:
       // what the user perceives is the frame, so that is what gets reported.
+      // Mark the page as loaded before anything else runs, so webview startup can be
+      // told apart from page execution when the total looks slow.
+      if (window.__TAURI__) {
+        window.__TAURI__.core.invoke('mark_page_loaded').catch(() => {})
+      }
+
       const firstFrame = () =>
         new Promise((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(resolve))
