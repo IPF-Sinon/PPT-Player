@@ -104,7 +104,11 @@ test('4. playback uses the same window and goes fullscreen', async () => {
   expect(app.windows().length).toBe(windowsBefore)
 
   await expect(win.getByTestId('playback-page')).toBeVisible()
-  await expect(win.getByTestId('playback-canvas')).toBeVisible()
+  // A PPTX now renders natively, so the canvas only exists for converted decks.
+  // The frame is the stable thing to assert on, and data-painted proves it drew.
+  const frame = win.getByTestId('slide-frame')
+  await expect(frame).toBeVisible()
+  await expect(frame).toHaveAttribute('data-painted', 'true', { timeout: 30_000 })
   await win.screenshot({ path: join(shots, 'playback.png') })
 })
 
@@ -143,7 +147,7 @@ test('7. the toolbar drives paging', async () => {
 test('8. the slide fills the screen without padding', async () => {
   // A 16:9 deck on a 16:9 viewport must cover the whole area: the old layout kept a
   // fixed 48px inset, which showed as a black border on every show.
-  const box = await win.getByTestId('playback-canvas').boundingBox()
+  const box = await win.getByTestId('slide-frame').boundingBox()
   expect(box).not.toBeNull()
   // The e2e tsconfig has no DOM lib, so the page-side globals are reached
   // through evaluate's own function scope rather than referenced directly.
@@ -184,7 +188,7 @@ test('10. annotations survive switching back to the pointer tool', async () => {
   // returned to the pointer: the ink canvas was unmounted when not drawing.
   await win.mouse.move(400, 300)
   await win.getByTestId('tool-pen').click()
-  const canvas = win.getByTestId('playback-canvas')
+  const canvas = win.getByTestId('slide-frame')
   const box = await canvas.boundingBox()
   expect(box).not.toBeNull()
 

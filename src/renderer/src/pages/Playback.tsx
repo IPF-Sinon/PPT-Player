@@ -312,6 +312,8 @@ export default function PlaybackPage() {
         <div
           className="slide-frame"
           ref={frameRef}
+          data-testid="slide-frame"
+          data-engine={isNative ? 'native-pptx' : 'pdf'}
           data-painted={isNative ? slide !== null : painted}
           style={{ ['--slide-ratio' as string]: String(ratio) }}
         >
