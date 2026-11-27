@@ -349,7 +349,7 @@ export default function PreviewPage() {
         onSettings={() => setSettingsOpen(true)}
       />
 
-      <div className="preview-body">
+      <div className="preview-body" data-testid="preview-body">
         <ThumbRail
           tab={tab}
           queue={queue}
@@ -449,7 +449,7 @@ export default function PreviewPage() {
         </div>
       </div>
 
-      <footer className="bottombar">
+      <footer className="bottombar" data-testid="bottombar">
         <div className="bottombar-group">
           <button
             type="button"

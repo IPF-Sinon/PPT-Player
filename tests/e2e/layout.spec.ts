@@ -58,13 +58,16 @@ test('1. the work area fills most of the window', async () => {
 })
 
 test('2. the footer stays fully inside the viewport', async () => {
-  const { box, viewport } = await measure('preview-body')
-  const footer = await measure('preview-pager')
+  const body = await measure('preview-body')
+  const footer = await measure('bottombar')
   expect(footer.box).not.toBeNull()
-  // The pager sits in the footer, so its bottom is a good proxy for the bar's.
-  expect(footer.box!.y + footer.box!.height).toBeLessThanOrEqual(viewport.height + 1)
+  // The bar must not be clipped by the window edge, which is what happened when the
+  // grid pushed it onto a fourth row.
+  expect(footer.box!.y + footer.box!.height).toBeLessThanOrEqual(footer.viewport.height + 1)
+  expect(footer.box!.height).toBeGreaterThanOrEqual(44)
+  expect(footer.box!.height).toBeLessThanOrEqual(64)
   // And the work area must end above it rather than overlapping.
-  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height + 1)
+  expect(body.box!.y + body.box!.height).toBeLessThanOrEqual(footer.viewport.height + 1)
 })
 
 test('3. the start button is visible and clickable without scrolling', async () => {
