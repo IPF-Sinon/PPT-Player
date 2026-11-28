@@ -110,7 +110,10 @@ function Invoke-Smoke {
     $source = Join-Path $repoRoot "tests\fixtures\$fixture"
     if (-not (Test-Path $source)) { throw "missing smoke fixture $source" }
     $stem = [System.IO.Path]::GetFileNameWithoutExtension($fixture)
-    $out = Join-Path $smokeDir ($Label + '-' + $stem)
+    # Keyed by the full file name, not the stem: smoke.pptx and smoke.docx share a stem,
+    # so they shared an output directory, and LibreOffice names its output after the
+    # source stem — each conversion overwrote the previous one's PDF.
+    $out = Join-Path $smokeDir ($Label + '-' + $fixture)
     New-Item -ItemType Directory -Force -Path $out | Out-Null
     $profileDir = Join-Path $smokeDir ('profile-' + [guid]::NewGuid().ToString('N'))
     $profileUrl = 'file:///' + ($profileDir -replace '\\', '/')
