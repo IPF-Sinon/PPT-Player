@@ -1,14 +1,28 @@
 name: build
 
-# Rust and frontend checks for the Tauri shell. Kept separate from ci.yml so the
-# Electron build keeps working while the migration is in progress.
+# The one workflow. Every push is checked, every push to main is packaged, and a
+# version tag publishes a release.
+#
+#   pull_request -> check only. Packaging costs twenty minutes and proves nothing a
+#                   merge would not prove anyway.
+#   push to main -> check, package, and keep the installers as artifacts, so whatever
+#                   is on main has already been built and smoke tested.
+#   tag v*       -> the same build, published as a GitHub release.
+#
+# The tag is the only thing that publishes: a merge to main cannot ship by accident.
 
 on:
   push:
-    branches: [main, feat/tauri-migration]
+    branches: [main]
+    tags: ['v*']
   pull_request:
-    branches: [main, feat/tauri-migration]
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish a release from this run (tag must match package.json)'
+        type: boolean
+        default: false
 
 env:
   PNPM_VERSION: 11.7.0
