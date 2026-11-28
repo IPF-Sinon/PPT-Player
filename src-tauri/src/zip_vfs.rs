@@ -173,7 +173,12 @@ impl ZipVfs {
 
 /// Normalise an entry name so lookups do not depend on leading slashes or case.
 pub fn normalise_entry(name: &str) -> String {
-    name.trim_start_matches('/').replace('\\', "/").to_lowercase()
+    // Separators are converted before trimming. Trimming first left a leading
+    // backslash in place, so the trim did nothing for exactly the inputs it exists to
+    // handle, and a Windows-style name never matched.
+    name.replace('\\', "/")
+        .trim_start_matches('/')
+        .to_lowercase()
 }
 
 fn invalid(message: impl Into<String>) -> std::io::Error {

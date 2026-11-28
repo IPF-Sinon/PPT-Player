@@ -294,7 +294,9 @@ pub fn engine_download_cancel() {
 
 #[tauri::command]
 pub fn recheck_engine(app: AppHandle) -> EngineStatus {
-    engine_resolve::resolve_engine(&app)
+    // Must bypass the cache: the whole point of the button is to re-probe after the
+    // user installs or points at an engine.
+    engine_resolve::resolve_engine_fresh(&app)
 }
 
 // ------------------------------------------------------------------ shell
