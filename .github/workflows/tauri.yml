@@ -85,3 +85,390 @@ jobs:
 
       - name: unit
         run: pnpm test
+
+  config:
+    name: validate tauri configs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The two configs are the whole packaging contract, and both ways they can
+      # break are silent until a Windows build has already been paid for: an
+      # invalid bundle target, and the full config losing its engine mapping.
+      - name: Assert the variant configs
+        run: |
+          node --input-type=module <<'EOF'
+          import { readFileSync } from 'node:fs'
+
+          const read = (p) => JSON.parse(readFileSync(p, 'utf8'))
+          const lite = read('src-tauri/tauri.conf.json')
+          const full = read('src-tauri/tauri.full.conf.json')
+          const problems = []
+
+          // Tauri 2 rejects any target outside this set while parsing the config,
+          // so a "zip" target here would fail the build rather than make a zip.
+          const VALID = ['deb', 'rpm', 'appimage', 'pacman', 'msi', 'nsis', 'app', 'dmg']
+          const targets = (lite.bundle?.targets ?? []).map((t) => String(t).toLowerCase())
+          for (const t of targets) {
+            if (!VALID.includes(t)) problems.push('lite bundle target "' + t + '" is not a Tauri 2 target')
+          }
+          if (!targets.includes('nsis')) problems.push('lite build must produce an NSIS installer')
+
+          // Lite must carry no engine; that is the entire point of the variant.
+          const res = lite.bundle?.resources
+          const empty = res === undefined
+            || (Array.isArray(res) && res.length === 0)
+            || (typeof res === 'object' && Object.keys(res).length === 0)
+          if (!empty) problems.push('lite config must bundle no resources, found ' + JSON.stringify(res))
+
+          if (lite.mainBinaryName !== 'PPTPlayer') {
+            problems.push('mainBinaryName must be PPTPlayer so the installer writes PPTPlayer.exe')
+          }
+
+          const nsis = lite.bundle?.windows?.nsis ?? {}
+          if (nsis.installMode !== 'currentUser') {
+            problems.push('NSIS installMode must be currentUser, found ' + JSON.stringify(nsis.installMode))
+          }
+          for (const lang of ['SimpChinese', 'English']) {
+            if (!(nsis.languages ?? []).includes(lang)) problems.push('NSIS languages must include ' + lang)
+          }
+
+          // The full config is a merge patch, so it only carries the engine.
+          // engine_resolve looks for resource_dir()/lo/program/soffice.com, and on
+          // Windows the resource dir is the install dir, so the mapping must land
+          // the tree under "lo".
+          const fullRes = full.bundle?.resources
+          if (!fullRes || Array.isArray(fullRes)) {
+            problems.push('full config must map resources as an object, found ' + JSON.stringify(fullRes))
+          } else {
+            if (!Object.values(fullRes).includes('lo')) {
+              problems.push('full config must map the engine tree to "lo", found ' + JSON.stringify(Object.values(fullRes)))
+            }
+            if (!Object.keys(fullRes).includes('../resources/lo')) {
+              problems.push('full config must source the engine from ../resources/lo, found ' + JSON.stringify(Object.keys(fullRes)))
+            }
+          }
+
+          if (problems.length > 0) {
+            for (const p of problems) console.error('::error::' + p)
+            process.exit(1)
+          }
+          console.log('tauri configs are consistent')
+          EOF
+
+  package:
+    name: package windows
+    # Two installers are slow and only meaningful on the migration branch, so pull
+    # requests run the config check above without paying for them.
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: pnpm/action-setup@v6.1.1
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: tauri-package-${{ hashFiles('src-tauri/Cargo.toml', 'src-tauri/build.rs') }}
+          restore-keys: tauri-package-
+
+      # The unpacked engine tree is what the full installer bundles. Cached so a
+      # rerun does not have to unpack the LibreOffice payload again.
+      - name: Restore bundled engine
+        uses: actions/cache@v5
+        with:
+          path: resources/lo
+          key: tauri-lo-tree-${{ hashFiles('resources/engine.json', 'scripts/prune-engine.ps1', 'scripts/build-engine.ps1') }}
+          restore-keys: tauri-lo-tree-
+
+      - name: Icon
+        shell: pwsh
+        run: node scripts/make-tauri-icon.mjs
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm build
+
+      # The CLI ships as an npm package with a prebuilt binary. Installing it from
+      # source took about twelve minutes a run, and cargo-binstall does not start
+      # on this image, so npm is the reliable path. This runs after pnpm install
+      # because pnpm would otherwise prune it as an extraneous package.
+      - name: Install Tauri CLI
+        shell: pwsh
+        run: |
+          npm install --no-save @tauri-apps/cli@2
+          if ($LASTEXITCODE -ne 0) { throw 'tauri cli install failed' }
+          npx tauri --version
+
+      # The engine zip is built by ci.yml, and actions/download-artifact only sees
+      # artifacts from the same workflow run, so it cannot be pulled across here.
+      # ci.yml caches the same zip under a key derived from these three files, and
+      # actions/cache is repo-scoped, so restoring that key is how this job reaches
+      # it. A miss is not fatal: the full installer is skipped, not failed, because
+      # the lite build is the one that has to work unconditionally.
+      - name: Restore the engine zip
+        id: engine-zip
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/lo-engine.zip
+          key: lo-engine-${{ hashFiles('resources/engine.json', 'scripts/prune-engine.ps1', 'scripts/build-engine.ps1') }}
+          restore-keys: lo-engine-
+
+      - name: Stage the engine tree
+        shell: pwsh
+        run: |
+          if (Test-Path 'resources/lo/program/soffice.com') {
+            Write-Host 'engine tree already present'
+            exit 0
+          }
+          $zip = Join-Path ${{ runner.temp }} 'lo-engine.zip'
+          if (-not (Test-Path $zip)) {
+            Write-Host '::warning::no cached engine zip, the full installer will be skipped'
+            exit 0
+          }
+          $tree = Join-Path ${{ runner.temp }} 'lo-tree'
+          Expand-Archive -Path $zip -DestinationPath $tree -Force
+          New-Item -ItemType Directory -Force -Path resources/lo | Out-Null
+          Copy-Item -Path (Join-Path $tree '*') -Destination resources/lo -Recurse -Force
+          if (-not (Test-Path 'resources/lo/program/soffice.com')) { throw 'staged engine has no soffice.com' }
+          Write-Host 'engine staged into resources/lo'
+
+      - name: Detect bundled engine
+        id: engine
+        shell: pwsh
+        run: |
+          if (Test-Path 'resources/lo/program/soffice.com') {
+            'present=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            'present=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host '::warning::resources/lo is absent, skipping the full installer'
+          }
+
+      # Lite is built first, and the release directory is cleaned first: the cargo
+      # target directory is restored from cache, so a previous full build can leave
+      # an engine next to the binary that a lite build would never remove (its
+      # resource list is empty, so nothing overwrites it). Left in place it would
+      # end up inside the lite zip and quietly delete the point of the variant.
+      - name: Clean stale engine from the release directory
+        shell: pwsh
+        run: |
+          foreach ($stale in 'src-tauri/target/release/lo', 'src-tauri/target/release/resources') {
+            if (Test-Path $stale) {
+              Write-Host ('removing stale ' + $stale)
+              Remove-Item -Recurse -Force $stale
+            }
+          }
+
+      - name: Build lite
+        shell: pwsh
+        run: |
+          npx tauri build --config src-tauri/tauri.conf.json --bundles nsis 2>&1 | Tee-Object -FilePath tauri-lite.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content tauri-lite.log -Tail 80
+            throw 'tauri build (lite) failed'
+          }
+
+      - name: Smoke test lite
+        shell: pwsh
+        run: |
+          $exe = 'src-tauri/target/release/PPTPlayer.exe'
+          if (-not (Test-Path $exe)) { throw 'lite release exe missing' }
+          $out = Join-Path ${{ runner.temp }} 'smoke-lite.out'
+          $err = Join-Path ${{ runner.temp }} 'smoke-lite.err'
+          Remove-Item $out, $err -ErrorAction SilentlyContinue
+
+          # A GUI binary with no console still writes to redirected handles, and the
+          # app logs '[startup] renderer ready' to stderr and to its log file. The
+          # window handle is the fallback, so a renderer that never reports in does
+          # not fail the build on its own. No GPU is required: WebView2 falls back
+          # to software rendering on the runner.
+          # The log lives in app data and survives between steps, so a stale line
+          # from an earlier launch would let this pass without the app starting.
+          $log = Join-Path $env:APPDATA 'com.ipf.sinon.pptplayer\config\ppt-player.log'
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
+
+          $proc = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          $deadline = (Get-Date).AddSeconds(90)
+          $ready = $false
+          $exitedEarly = $false
+          while ((Get-Date) -lt $deadline) {
+            $proc.Refresh()
+            if ($proc.HasExited) { $exitedEarly = $true; break }
+            if ($proc.MainWindowHandle -ne 0) { $ready = $true; break }
+            if ((Test-Path $err) -and ((Get-Content $err -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
+            if ((Test-Path $log) -and ((Get-Content $log -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
+            Start-Sleep -Milliseconds 300
+          }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+
+          Write-Host '--- stderr ---'
+          if (Test-Path $err) { Get-Content $err | Select-Object -Last 40 }
+
+          if (-not $ready) {
+            if ($exitedEarly) { throw 'lite smoke test failed: the app exited before it reported ready' }
+            throw 'lite smoke test failed: no window and no ready log within 90s'
+          }
+          Write-Host 'lite smoke test passed'
+
+      - name: Package lite artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $installer = Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' | Select-Object -First 1
+          if ($null -eq $installer) { throw 'lite NSIS installer missing' }
+
+          $liteMb = [math]::Round($installer.Length / 1MB, 2)
+          Write-Host ('lite installer: {0} MB' -f $liteMb)
+          ('LITE_INSTALLER_MB=' + $liteMb) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          # The gate is the point of the lite variant. The Electron lite build is
+          # 108.8 MB, almost all of it the Electron runtime; a Tauri build that
+          # ships no engine has no business near 20 MB, and a number above it means
+          # the engine or a webview runtime came along by accident.
+          if ($installer.Length -ge 20MB) {
+            throw ('lite installer is ' + $liteMb + ' MB, the budget is 20 MB')
+          }
+          Copy-Item $installer.FullName 'artifacts/PPTPlayer-Setup-x64-lite.exe' -Force
+
+          $stage = Join-Path ${{ runner.temp }} 'lite-zip'
+          if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item 'src-tauri/target/release/PPTPlayer.exe' $stage
+          if (Test-Path 'src-tauri/target/release/resources') {
+            Copy-Item 'src-tauri/target/release/resources' $stage -Recurse
+          }
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath 'artifacts/PPTPlayer-x64-lite.zip' -CompressionLevel Optimal -Force
+
+          # The lite package must not carry an engine. If it does, the two variants
+          # have collapsed into one and the on-demand download path is dead code.
+          $check = Join-Path ${{ runner.temp }} 'lite-check'
+          if (Test-Path $check) { Remove-Item -Recurse -Force $check }
+          Expand-Archive -Path 'artifacts/PPTPlayer-x64-lite.zip' -DestinationPath $check -Force
+          if (Test-Path (Join-Path $check 'lo')) { throw 'lite zip contains a bundled engine' }
+          if (Test-Path (Join-Path $check 'resources/lo')) { throw 'lite zip contains a bundled engine' }
+          Write-Host 'lite artifacts verified'
+
+      - name: Build full
+        if: steps.engine.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          # Both variants produce PPTPlayer_<version>_x64-setup.exe, so the lite
+          # installer is still sitting in this folder. Clearing it first means the
+          # full packaging step can only ever pick up the full build's output.
+          if (Test-Path 'src-tauri/target/release/bundle/nsis') {
+            Remove-Item -Recurse -Force 'src-tauri/target/release/bundle/nsis'
+          }
+          npx tauri build --config src-tauri/tauri.full.conf.json --bundles nsis 2>&1 | Tee-Object -FilePath tauri-full.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content tauri-full.log -Tail 80
+            throw 'tauri build (full) failed'
+          }
+
+      - name: Verify the full build staged the engine
+        if: steps.engine.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          # tauri-build copies configured resources next to the release binary, so
+          # this is the same tree the installer will place at <install>/lo, which is
+          # what engine_resolve reads as resource_dir()/lo.
+          if (-not (Test-Path 'src-tauri/target/release/lo/program/soffice.com')) {
+            throw 'full build did not stage the engine next to the binary'
+          }
+          Write-Host 'full build staged resources/lo'
+
+      - name: Smoke test full
+        if: steps.engine.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $exe = 'src-tauri/target/release/PPTPlayer.exe'
+          if (-not (Test-Path $exe)) { throw 'full release exe missing' }
+          $out = Join-Path ${{ runner.temp }} 'smoke-full.out'
+          $err = Join-Path ${{ runner.temp }} 'smoke-full.err'
+          Remove-Item $out, $err -ErrorAction SilentlyContinue
+          # Same reason as the lite smoke test: a stale log would fake a pass.
+          $log = Join-Path $env:APPDATA 'com.ipf.sinon.pptplayer\config\ppt-player.log'
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
+
+          $proc = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          $deadline = (Get-Date).AddSeconds(90)
+          $ready = $false
+          while ((Get-Date) -lt $deadline) {
+            $proc.Refresh()
+            if ($proc.HasExited) { break }
+            if ($proc.MainWindowHandle -ne 0) { $ready = $true; break }
+            if ((Test-Path $err) -and ((Get-Content $err -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
+            if ((Test-Path $log) -and ((Get-Content $log -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
+            Start-Sleep -Milliseconds 300
+          }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+
+          Write-Host '--- stderr ---'
+          if (Test-Path $err) { Get-Content $err | Select-Object -Last 40 }
+          if (-not $ready) { throw 'full smoke test failed: no window and no ready log within 90s' }
+          Write-Host 'full smoke test passed'
+
+      - name: Package full artifacts
+        if: steps.engine.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' | Select-Object -First 1
+          if ($null -eq $installer) { throw 'full NSIS installer missing' }
+          $fullMb = [math]::Round($installer.Length / 1MB, 2)
+          Write-Host ('full installer: {0} MB' -f $fullMb)
+          ('FULL_INSTALLER_MB=' + $fullMb) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Copy-Item $installer.FullName 'artifacts/PPTPlayer-Setup-x64-full.exe' -Force
+
+          $stage = Join-Path ${{ runner.temp }} 'full-zip'
+          if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item 'src-tauri/target/release/PPTPlayer.exe' $stage
+          Copy-Item 'src-tauri/target/release/lo' $stage -Recurse
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath 'artifacts/PPTPlayer-x64-full.zip' -CompressionLevel Optimal -Force
+          Write-Host 'full artifacts packaged'
+
+      - name: Report artifact sizes
+        shell: pwsh
+        run: |
+          if (-not (Test-Path artifacts)) { throw 'no artifacts were produced' }
+          Get-ChildItem -Path artifacts -File | ForEach-Object {
+            Write-Host ('{0} = {1:N1} MB' -f $_.Name, ($_.Length / 1MB))
+          }
+          '### packaged artifacts' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Get-ChildItem -Path artifacts -File | ForEach-Object {
+            ('- ' + $_.Name + ' (' + [math]::Round($_.Length / 1MB, 1) + ' MB)') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: tauri-windows
+          path: artifacts/*
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Build logs
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: tauri-build-logs
+          path: |
+            tauri-lite.log
+            tauri-full.log
+          retention-days: 7
+          if-no-files-found: ignore
+

@@ -3,6 +3,7 @@
   "productName": "PPTPlayer",
   "version": "1.0.0",
   "identifier": "com.ipf.sinon.pptplayer",
+  "mainBinaryName": "PPTPlayer",
   "build": {
     "frontendDist": "../out/renderer"
   },
