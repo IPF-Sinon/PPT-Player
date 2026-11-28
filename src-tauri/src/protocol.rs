@@ -393,9 +393,24 @@ mod tests {
     }
 
     #[test]
-    fn ooxml_parts_are_served_as_xml() {
+    fn ooxml_markup_is_served_as_xml() {
         assert_eq!(content_type_for("ppt/slides/slide1.xml"), "application/xml");
         assert_eq!(content_type_for("ppt/_rels/presentation.xml.rels"), "application/xml");
-        assert_eq!(content_type_for("ppt/media/image1.png"), "text/plain");
+    }
+
+    #[test]
+    fn media_parts_get_a_type_the_webview_can_decode() {
+        // Serving these as text/plain is why embedded pictures and sounds never
+        // loaded: the webview decides whether it can decode a part from this header.
+        assert_eq!(content_type_for("ppt/media/image1.png"), "image/png");
+        assert_eq!(content_type_for("ppt/media/image2.JPG"), "image/jpeg");
+        assert_eq!(content_type_for("ppt/media/logo.svg"), "image/svg+xml");
+        assert_eq!(content_type_for("ppt/media/clip.mp3"), "audio/mpeg");
+        assert_eq!(content_type_for("ppt/media/movie.mp4"), "video/mp4");
+    }
+
+    #[test]
+    fn unknown_parts_fall_back_to_octet_stream() {
+        assert_eq!(content_type_for("ppt/media/blob.bin"), "application/octet-stream");
     }
 }
