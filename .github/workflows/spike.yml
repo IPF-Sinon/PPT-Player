@@ -122,6 +122,23 @@ jobs:
           $paint = (Get-Content spike-run.err -ErrorAction SilentlyContinue | Select-String "painted_ms").Line
           if (-not $paint) { Write-Host "::warning::no paint measurement captured" } else { Write-Host $paint }
 
+          # Second launch, same machine. WebView2 creates its user data directory on the
+          # first run, which is a one-off cost; measuring again tells us whether the
+          # 6.8 s figure is that cost or the steady state a user would actually see.
+          Remove-Item spike-run2.err, spike-run2.out -ErrorAction SilentlyContinue
+          $proc2 = Start-Process -FilePath $exe -PassThru -RedirectStandardError spike-run2.err -RedirectStandardOutput spike-run2.out
+          $deadline2 = (Get-Date).AddSeconds(40)
+          while ((Get-Date) -lt $deadline2) {
+            if (Test-Path spike-run2.err) {
+              $text2 = Get-Content spike-run2.err -Raw -ErrorAction SilentlyContinue
+              if ($text2 -and $text2.Contains('notes:')) { break }
+            }
+            Start-Sleep -Milliseconds 400
+          }
+          if (-not $proc2.HasExited) { Stop-Process -Id $proc2.Id -Force }
+          Write-Host "--- second launch (warm) ---"
+          if (Test-Path spike-run2.err) { Get-Content spike-run2.err | Tee-Object -FilePath spike-run.txt -Append }
+
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: tauri-spike
