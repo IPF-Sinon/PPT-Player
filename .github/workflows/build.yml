@@ -362,6 +362,29 @@ jobs:
             Move-Item -Path 'resources/lo' -Destination 'resources/lo-full'
             Write-Host 'engine moved aside for the lite build'
           }
+          # The tree is moved, but a cargo cache restore can leave an engine beside the
+          # binary as well, and NSIS packs that too. Sweep every place it can hide and
+          # report the total, so a size failure names the culprit instead of guessing.
+          $swept = 0
+          foreach ($stale in @(
+            'src-tauri/target/release/lo',
+            'src-tauri/target/release/resources',
+            'src-tauri/target/release/program',
+            'src-tauri/target/release/share'
+          )) {
+            if (Test-Path $stale) {
+              $mb = [math]::Round(((Get-ChildItem $stale -Recurse -File -ErrorAction SilentlyContinue |
+                Measure-Object Length -Sum).Sum / 1MB), 1)
+              Write-Host ("removing " + $stale + " (" + $mb + " MB)")
+              Remove-Item -Recurse -Force $stale
+              $swept += $mb
+            }
+          }
+          Write-Host ("engine material removed from the release directory: " + $swept + " MB")
+          $exe = 'src-tauri/target/release/PPTPlayer.exe'
+          if (Test-Path $exe) {
+            Write-Host ("existing binary: " + [math]::Round((Get-Item $exe).Length / 1MB, 1) + " MB")
+          }
 
       - name: Build lite
         shell: pwsh
@@ -396,6 +419,16 @@ jobs:
           # ships no engine has no business near 20 MB, and a number above it means
           # the engine or a webview runtime came along by accident.
           if ($installer.Length -ge 20MB) {
+            # Name what is large instead of only that something is.
+            Write-Host '--- largest directories in the release folder ---'
+            Get-ChildItem 'src-tauri/target/release' -Directory -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                $size = (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
+                  Measure-Object Length -Sum).Sum
+                if ($size -gt 5MB) {
+                  Write-Host ('  ' + $_.Name + ': ' + [math]::Round($size / 1MB, 1) + ' MB')
+                }
+              }
             throw ('lite installer is ' + $liteMb + ' MB, the budget is 20 MB')
           }
           Copy-Item $installer.FullName 'artifacts/PPTPlayer-Setup-x64-lite.exe' -Force
