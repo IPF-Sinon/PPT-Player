@@ -15,6 +15,42 @@ env:
   NODE_VERSION: 24
 
 jobs:
+  # A tag that disagrees with package.json would publish installers whose version
+  # string contradicts the release name, so this is checked before anything is built.
+  version:
+    name: check version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Check the tag matches the app version
+        id: check
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          publish=false
+          if [ "$REF_TYPE" = "tag" ]; then
+            if [ "$REF_NAME" != "$tag" ]; then
+              echo "::error::tag $REF_NAME does not match package.json version $version"
+              exit 1
+            fi
+            publish=true
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$INPUT_PUBLISH" = "true" ]; then
+            publish=true
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "app version $version -> tag $tag publish=$publish"
+
   rust:
     name: cargo check and test
     runs-on: windows-latest
