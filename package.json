@@ -21,9 +21,10 @@
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test",
     "package": "npm run package:lite",
-    "package:full": "npm run build && npx --yes @tauri-apps/cli@2 build --config src-tauri/tauri.full.conf.json --bundles nsis,zip",
-    "package:lite": "npm run build && npx --yes @tauri-apps/cli@2 build --config src-tauri/tauri.conf.json --bundles nsis,zip",
-    "fixtures": "node scripts/make-fixtures.mjs"
+    "package:full": "npm run build && tauri build --config src-tauri/tauri.full.conf.json --bundles nsis",
+    "package:lite": "npm run build && tauri build --config src-tauri/tauri.conf.json --bundles nsis",
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "tauri:dev": "tauri dev"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.5"

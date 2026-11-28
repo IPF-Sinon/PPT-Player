@@ -22,18 +22,17 @@
         "src/shared/*"
       ],
       "@main/*": [
-        "src/main/*"
+        "src-tauri/*"
       ]
     }
   },
   "include": [
-    "electron.vite.config.ts",
+    "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
-    "src/main/**/*",
-    "src/preload/**/*",
     "src/shared/**/*",
     "tests/unit/**/*",
+    "tests/helpers/**/*",
     "tests/e2e/**/*"
   ],
   "exclude": [

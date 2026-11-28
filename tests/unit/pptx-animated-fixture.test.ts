@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
-import { openZipVfs } from '../../src/main/pptx/zip-vfs'
-import { buildPresentationIndex } from '../../src/main/pptx/index-parse'
+import { openZipVfs } from '../helpers/zip-vfs'
+import { buildPresentationIndex } from '../helpers/index-parse'
 import { loadTheme, parseSlide } from '../../src/renderer/src/lib/pptx/parser'
 import { evaluateStep, initiallyHidden } from '../../src/renderer/src/lib/pptx/animations'
 

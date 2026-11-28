@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import PptxGenJS from 'pptxgenjs'
-import { openZipVfs } from '../../src/main/pptx/zip-vfs'
-import { buildPresentationIndex } from '../../src/main/pptx/index-parse'
+import { openZipVfs } from '../helpers/zip-vfs'
+import { buildPresentationIndex } from '../helpers/index-parse'
 
 /**
  * Opening a PPTX must be size independent: the index reads the tail and the

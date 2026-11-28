@@ -3,8 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import PptxGenJS from 'pptxgenjs'
-import { openZipVfs, normaliseEntry, type ZipVfs } from '../../src/main/pptx/zip-vfs'
-import { buildPresentationIndex, relsPartFor, resolvePartTarget } from '../../src/main/pptx/index-parse'
+import { openZipVfs, normaliseEntry, type ZipVfs } from '../helpers/zip-vfs'
+import { buildPresentationIndex, relsPartFor, resolvePartTarget } from '../helpers/index-parse'
 import { loadTheme, parseSlide } from '../../src/renderer/src/lib/pptx/parser'
 
 const scratchRoot = join(process.cwd(), '.cache', 'test-scratch')
