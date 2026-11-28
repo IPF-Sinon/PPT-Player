@@ -26,8 +26,6 @@ use std::path::Path;
 
 use calamine::{open_workbook_auto, Data, Range, Reader, Sheets};
 
-use crate::types::*;
-
 /// Rows returned by one call when the caller does not ask for a window.
 ///
 /// Sized to a tall projector screen: a 1080p window at the default row height shows
@@ -393,7 +391,7 @@ fn sheet_part_for(vfs: &crate::zip_vfs::ZipVfs, sheet_name: &str) -> Option<Stri
 /// A hand-rolled scan rather than an XML parser: the fragments being read are
 /// mergeCell and col elements, and pulling in a full parser to read two attributes of
 /// a well-formed document would be a large dependency for a small job.
-fn elements<'a>(xml: &'a str, name: &str) -> Vec<String> {
+fn elements(xml: &str, name: &str) -> Vec<String> {
     let open = format!("<{name}");
     let mut out = Vec::new();
     let mut at = 0usize;
@@ -1252,6 +1250,12 @@ mod tests {
     /// This is the test that matters: every other test in this module asserts a rule
     /// this module wrote, and a rule can be wrong in the same way twice. This one opens
     /// bytes that were not produced here and asks whether the reader agrees with them.
+    /// Reads the generated workbook end to end.
+    ///
+    /// This one DOES depend on make-fixtures, which the rust job in CI does not run, so
+    /// it returns early there and is proved locally instead. The GBK test below is
+    /// self-contained for that reason; the OOXML geometry it covers is also covered by
+    /// the parser tests above, which need no fixture.
     #[test]
     fn a_real_xlsx_fixture_reads_as_the_writer_wrote_it() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1325,22 +1329,42 @@ mod tests {
         assert!(width_of(0).unwrap() > width_of(1).unwrap());
     }
 
+    /// The GBK fixture, written to a temp file and opened through the real entry point.
+    ///
+    /// Deliberately NOT read from tests/fixtures: the rust job in CI does not run
+    /// make-fixtures (it has no Node), so a fixture-reading test there would return
+    /// early and prove nothing. These are the same bytes make-fixtures writes, inlined,
+    /// so the GBK path is exercised on every run including CI.
+    ///
+    /// The bytes are real GBK from an independent encoder and are deliberately not
+    /// valid UTF-8: a fixture that happened to be valid UTF-8 would test nothing.
     #[test]
-    fn a_csv_fixture_reads_as_a_sheet_with_its_encoding_reported() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("tests")
-            .join("fixtures")
-            .join("deck-sheet-gbk.csv");
-        if !path.exists() {
-            return;
-        }
-        let model = open_spreadsheet(&path, &SheetRequest::default()).expect("the fixture opens");
-        assert_eq!(model.encoding, SheetEncoding::Gbk);
+    fn a_gbk_csv_opens_with_its_encoding_reported() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("成绩.csv");
+        // 姓名,分数 / 张三,95 / 李四,88.5
+        let bytes: &[u8] = &[
+            0xd0, 0xd5, 0xc3, 0xfb, 0x2c, 0xb7, 0xd6, 0xca, 0xfd, 0x0d, 0x0a, 0xd5, 0xc5, 0xc8,
+            0xfd, 0x2c, 0x39, 0x35, 0x0d, 0x0a, 0xc0, 0xee, 0xcb, 0xc4, 0x2c, 0x38, 0x38, 0x2e,
+            0x35, 0x0d, 0x0a,
+        ];
+        std::fs::write(&path, bytes).expect("write the csv");
+
+        let model = open_spreadsheet(&path, &SheetRequest::default()).expect("the csv opens");
+        assert_eq!(model.encoding, SheetEncoding::Gbk, "the bytes are not UTF-8");
         assert_eq!(model.sheets.len(), 1);
-        let first = &model.sheet.rows[0];
-        // The GBK bytes decode to the same header the UTF-8 fixture carries.
-        assert_eq!(first.cells[0].text, "姓名");
-        assert_eq!(first.cells[1].text, "分数");
+        assert!(!model.deck_id.is_empty(), "the deck id keys the annotations");
+
+        let sheet = &model.sheet;
+        assert_eq!(sheet.row_count, 3);
+        assert_eq!(sheet.rows.len(), 3);
+        // The header, decoded rather than mangled into replacement characters.
+        let header: Vec<&str> = sheet.rows[0].cells.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(header, vec!["姓名", "分数"]);
+        // A CSV field is text even when it looks like a number, so a course code such
+        // as 0101 cannot be corrupted into 101.
+        assert_eq!(sheet.rows[1].cells[1].text, "95");
+        assert_eq!(sheet.rows[1].cells[1].kind, CellKind::Text);
+        assert_eq!(sheet.rows[2].cells[1].text, "88.5");
     }
 }
