@@ -42,6 +42,12 @@ tauri-plugin-autostart = "2"
 # cell accessors and the Data enum.
 calamine = "0.26"
 
+# calamine 0.26.1 does not compile against zip 2.6: that release made ZipFile generic,
+# which broke calamine's own source, not just ours. Pinning the transitive dependency is
+# the documented workaround until calamine catches up. Remove once calamine requires a
+# newer zip itself.
+zip = "=2.5.0"
+
 [dev-dependencies]
 tempfile = "3"
 
