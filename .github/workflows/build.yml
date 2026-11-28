@@ -351,6 +351,18 @@ jobs:
             }
           }
 
+      # The engine tree is staged before this point so the full build can use it, but a
+      # lite build that sees resources/lo bundles it: the lite installer went from 3 MB to
+      # 89 MB that way. The tree is moved aside and restored for the full build.
+      - name: Keep the engine out of the lite build
+        shell: pwsh
+        run: |
+          if (Test-Path 'resources/lo') {
+            if (Test-Path 'resources/lo-full') { Remove-Item -Recurse -Force 'resources/lo-full' }
+            Move-Item -Path 'resources/lo' -Destination 'resources/lo-full'
+            Write-Host 'engine moved aside for the lite build'
+          }
+
       - name: Build lite
         shell: pwsh
         run: |
@@ -410,6 +422,12 @@ jobs:
         if: steps.engine.outputs.present == 'true'
         shell: pwsh
         run: |
+          # Put back the engine the lite build was kept away from.
+          if (Test-Path 'resources/lo-full') {
+            if (Test-Path 'resources/lo') { Remove-Item -Recurse -Force 'resources/lo' }
+            Move-Item -Path 'resources/lo-full' -Destination 'resources/lo'
+            Write-Host 'engine restored for the full build'
+          }
           # Both variants produce PPTPlayer_<version>_x64-setup.exe, so the lite
           # installer is still sitting in this folder. Clearing it first means the
           # full packaging step can only ever pick up the full build's output.
