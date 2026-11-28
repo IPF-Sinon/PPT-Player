@@ -1,6 +1,6 @@
 [package]
 name = "ppt-player"
-version = "1.2.0"
+version = "1.2.1"
 description = "PPT player with native OOXML rendering"
 edition = "2021"
 rust-version = "1.77"
