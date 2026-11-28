@@ -326,6 +326,87 @@ async function buildExit() {
   writeFileSync(join(outDir, 'deck-exit.pptx'), Buffer.from(zipSync(files)))
 }
 
+/**
+ * Minimal Word document.
+ *
+ * Hand-built rather than generated: it exists so the engine probe can prove Writer
+ * was not pruned away, and one paragraph of text is enough for that.
+ */
+function buildDocx() {
+  const files = {
+    '[Content_Types].xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+        '</Types>'
+    ),
+    '_rels/.rels': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+        '</Relationships>'
+    ),
+    'word/document.xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+        '<w:body>' +
+        '<w:p><w:r><w:t>第一段：课堂讲义。</w:t></w:r></w:p>' +
+        '<w:p><w:r><w:t>第二段：用于验证 Writer 转换。</w:t></w:r></w:p>' +
+        '<w:sectPr/>' +
+        '</w:body></w:document>'
+    )
+  }
+  writeFileSync(join(outDir, 'smoke.docx'), Buffer.from(zipSync(files)))
+}
+
+/**
+ * Minimal spreadsheet.
+ *
+ * Two cells is enough to make Calc the only thing that can produce a PDF from it.
+ */
+function buildXlsx() {
+  const files = {
+    '[Content_Types].xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+        '</Types>'
+    ),
+    '_rels/.rels': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+        '</Relationships>'
+    ),
+    'xl/workbook.xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+        '<sheets><sheet name="成绩" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    ),
+    'xl/_rels/workbook.xml.rels': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+        '</Relationships>'
+    ),
+    'xl/worksheets/sheet1.xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+        '<sheetData>' +
+        '<row r="1"><c r="A1" t="inlineStr"><is><t>姓名</t></is></c><c r="B1" t="inlineStr"><is><t>分数</t></is></c></row>' +
+        '<row r="2"><c r="A2" t="inlineStr"><is><t>张三</t></is></c><c r="B2"><v>95</v></c></row>' +
+        '</sheetData></worksheet>'
+    )
+  }
+  writeFileSync(join(outDir, 'smoke.xlsx'), Buffer.from(zipSync(files)))
+}
+
 await build16x9()
 await build4x3()
 await buildSmokePptx()
@@ -333,5 +414,7 @@ await buildAnimated()
 await buildTriggers()
 await buildExit()
 buildSmokeOdp()
+buildDocx()
+buildXlsx()
 
-console.log('[make-fixtures] wrote deck-16x9, deck-4x3, smoke, deck-animated, deck-triggers, deck-exit, smoke.odp')
+console.log('[make-fixtures] wrote deck-16x9, deck-4x3, smoke, deck-animated, deck-triggers, deck-exit, smoke.odp, smoke.docx, smoke.xlsx')

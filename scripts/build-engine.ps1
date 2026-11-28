@@ -72,12 +72,16 @@ Write-Host "LibreOffice tree root: $installRoot"
 
 $soffice = Join-Path $installRoot 'program\soffice.com'
 $pruneScript = Join-Path $PSScriptRoot 'prune-engine.ps1'
-$fixtures = @('smoke.pptx', 'smoke.odp', 'deck-16x9.pptx', 'deck-4x3.pptx')
+$fixtures = @('smoke.pptx', 'smoke.odp', 'deck-16x9.pptx', 'deck-4x3.pptx', 'smoke.docx', 'smoke.xlsx')
 $expectedPages = @{
   'smoke.pptx'     = 1
   'smoke.odp'      = 2
   'deck-16x9.pptx' = 3
   'deck-4x3.pptx'  = 2
+  # Word and Excel export to PDF too, and they are the only fixtures that prove the
+  # Writer and Calc libraries survived pruning.
+  'smoke.docx'     = 1
+  'smoke.xlsx'     = 1
 }
 
 $smokeDir = Join-Path $WorkDir 'smoke'
@@ -111,10 +115,20 @@ function Invoke-Smoke {
     $profileDir = Join-Path $smokeDir ('profile-' + [guid]::NewGuid().ToString('N'))
     $profileUrl = 'file:///' + ($profileDir -replace '\\', '/')
 
+    # Each application has its own PDF exporter. Naming the wrong one converts
+    # nothing, and the failure reads as a timeout rather than a wrong filter.
+    $filter = switch ([System.IO.Path]::GetExtension($fixture).ToLower()) {
+      '.docx' { 'pdf:writer_pdf_Export' }
+      '.doc' { 'pdf:writer_pdf_Export' }
+      '.xlsx' { 'pdf:calc_pdf_Export' }
+      '.xls' { 'pdf:calc_pdf_Export' }
+      default { 'pdf:impress_pdf_Export' }
+    }
+
     $sofficeArgs = @(
       '--headless', '--norestore', '--invisible', '--nologo',
       "-env:UserInstallation=$profileUrl",
-      '--convert-to', 'pdf:impress_pdf_Export',
+      '--convert-to', $filter,
       '--outdir', $out, $source
     )
     if (-not (Invoke-Soffice -SofficeExe $soffice -Arguments $sofficeArgs)) {
@@ -206,7 +220,10 @@ foreach ($rel in $probePaths) {
 
   $backup = $target + '.probe-bak'
   Move-Item -Path $target -Destination $backup -Force
-  if (Test-Smoke -Fixtures @('smoke.pptx')) {
+  # Every fixture is probed, not just the deck. Testing only a pptx meant the Writer
+  # and Calc libraries looked unused and were removed, which silently broke document
+  # and spreadsheet conversion in the shipped engine.
+  if (Test-Smoke -Fixtures @('smoke.pptx', 'smoke.docx', 'smoke.xlsx')) {
     Write-Host "  drop $rel"
     Remove-Item -Recurse -Force $backup -ErrorAction SilentlyContinue
     $dropped += $rel
