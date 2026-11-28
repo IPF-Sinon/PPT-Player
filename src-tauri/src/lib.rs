@@ -34,7 +34,7 @@ pub mod settings;
 pub mod types;
 pub mod zip_vfs;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// Start the app.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -42,6 +42,18 @@ pub fn run() {
     let pending = paths::pending_open_path_from_args(std::env::args().skip(1).collect());
 
     tauri::Builder::default()
+        // A second launch must focus the existing window and hand it the file, which
+        // is what Electron's second-instance event did. Without this the app either
+        // opens twice or silently drops the file.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+            if let Some(file) = paths::pending_open_path_from_args(argv) {
+                let _ = app.emit("app:open-external", file);
+            }
+        }))
         .manage(commands::AppState::new(pending))
         .register_uri_scheme_protocol("deck", |ctx, request| {
             protocol::handle_deck(ctx.app_handle(), &request)

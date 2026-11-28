@@ -72,9 +72,32 @@ pub fn probe(path: String) -> ProbeResult {
 
 #[tauri::command]
 pub fn open(app: AppHandle, path: String) -> OpenResult {
+    // The UI shows a progress bar from these events. Without them the bar sits at
+    // whatever it started with, which reads as a hang on a slow conversion.
+    let emit = |stage: ConvertStage, ratio: f64, message: &str, deck_id: &str| {
+        let _ = app.emit(
+            "deck:progress",
+            ConvertProgress {
+                deck_id: deck_id.to_string(),
+                stage,
+                ratio,
+                message: message.to_string(),
+            },
+        );
+    };
+
+    emit(ConvertStage::Probe, 0.05, "正在识别文件", "");
+    emit(ConvertStage::Convert, 0.15, "正在转换", "");
+
     match convert::open_deck(&app, &path) {
-        Ok(info) => OpenResult::ok(info),
-        Err(message) => OpenResult::err("open-failed", message),
+        Ok(info) => {
+            emit(ConvertStage::Done, 1.0, "完成", &info.deck_id);
+            OpenResult::ok(info)
+        }
+        Err(message) => {
+            emit(ConvertStage::Failed, 0.0, &message, "");
+            OpenResult::err("open-failed", message)
+        }
     }
 }
 

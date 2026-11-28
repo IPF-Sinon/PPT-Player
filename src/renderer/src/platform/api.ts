@@ -25,6 +25,7 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import type {
   AppSettings,
   BootstrapInfo,
@@ -54,6 +55,14 @@ export interface PlatformApi {
   pickFile(): Promise<string | null>
   /** Resolve the real path of a dropped File. */
   getPathForFile(file: File): string
+  /**
+   * Subscribe to files dropped on the window.
+   *
+   * Tauri intercepts the platform drag-drop and delivers real paths out of band, so
+   * the browser's own drop event never fires and a File carries no path. This is the
+   * replacement for the HTML5 drop handler.
+   */
+  onFileDrop(cb: (path: string) => void): () => void
 
   // ---- asset URLs
   /** URL of a converted deck's PDF. */
@@ -215,6 +224,30 @@ const tauriApi: PlatformApi = {
   // onDragDropEvent ({ type: 'drop', paths }) — so the HTML5 drop handler in
   // Preview.tsx needs that event, not this method, to open a dropped deck.
   getPathForFile: (file) => (file as File & { path?: string }).path ?? '',
+
+  /**
+   * Files dropped on the window.
+   *
+   * Tauri takes over the platform drop handler, so the DOM drop event never fires and
+   * the path arrives here instead. Without this, dropping a deck does nothing.
+   */
+  onFileDrop: (cb) => {
+    let dispose: (() => void) | undefined
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === 'drop') {
+          const first = event.payload.paths[0]
+          if (first) cb(first)
+        }
+      })
+      .then((unlisten) => {
+        dispose = unlisten
+      })
+      .catch(() => {
+        // Not running under Tauri; dropping is simply unavailable.
+      })
+    return () => dispose?.()
+  },
 
   deckUrl: (deckId) => 'http://deck.localhost/' + deckId + '/deck.pdf',
   pptxUrl: (deckId, partPath) => 'http://pptx.localhost/' + deckId + '/' + partPath,

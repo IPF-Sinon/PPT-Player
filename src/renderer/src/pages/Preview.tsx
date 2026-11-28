@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { DragEvent as ReactDragEvent } from 'react'
 import { zh } from '@shared/strings.zh'
 import { useAppStore } from '../store'
 import { loadPdf, preloadPdfjs, readFirstPageSize, readPageSizes } from '../lib/pdf'
@@ -21,7 +20,7 @@ export default function PreviewPage() {
   const activeTabId = useAppStore((s) => s.activeTabId)
   const tab = useMemo(() => tabs.find((t) => t.tabId === activeTabId) ?? null, [tabs, activeTabId])
   const [recent, setRecent] = useState<string[]>([])
-  const [dragOver, setDragOver] = useState(false)
+
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** Set when the lite build needs the engine to open the requested file. */
   const [enginePrompt, setEnginePrompt] = useState<{ bytes: number; retry: () => void } | null>(null)
@@ -236,15 +235,13 @@ export default function PreviewPage() {
     if (path) await openFile(path)
   }, [openFile])
 
-  const onDrop = async (event: ReactDragEvent<HTMLDivElement>): Promise<void> => {
-    event.preventDefault()
-    setDragOver(false)
-    const file = event.dataTransfer.files.item(0)
-    if (!file) return
-    // Electron 32 removed File.path; the path comes from the preload bridge.
-    const path = platform().getPathForFile(file)
-    if (path) await openFile(path)
-  }
+  // Tauri takes over the platform drop handler, so the DOM drop event never fires and
+  // a dropped File carries no path. The real path arrives through onFileDrop instead.
+  useEffect(() => {
+    return platform().onFileDrop((path) => {
+      void openFile(path)
+    })
+  }, [openFile])
 
   const startShow = useCallback(
     async (fromStart = false): Promise<void> => {
@@ -331,16 +328,7 @@ export default function PreviewPage() {
   const currentSlide = isNative ? tab?.nativeDeck?.slides[pageIndex] ?? null : null
 
   return (
-    <div
-      className="preview"
-      onDragOver={(e) => {
-        e.preventDefault()
-        setDragOver(true)
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={onDrop}
-      data-testid="preview-page"
-    >
+    <div className="preview" data-testid="preview-page">
       <TabBar
         tabs={tabs}
         activeTabId={activeTabId}
@@ -381,7 +369,7 @@ export default function PreviewPage() {
             ) : null
           ) : (
             <div className="stage" data-testid="stage-empty">
-              <div className="stage-empty" data-over={dragOver}>
+              <div className="stage-empty">
                 <Folder size={28} style={{ color: 'var(--text-faint)' }} />
                 <h2>{zh.open.title}</h2>
                 <p>{zh.open.dropHint}</p>
