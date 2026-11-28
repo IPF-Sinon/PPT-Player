@@ -17,7 +17,7 @@ use crate::commands::AppState;
 
 /// Serve a converted deck PDF, honouring Range.
 pub fn handle_deck(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
-    if request.method() == Method::OPTIONS {
+    if *request.method() == Method::OPTIONS {
         return preflight();
     }
 
@@ -35,7 +35,7 @@ pub fn handle_deck(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<
 
 /// Serve one part of a natively opened PPTX.
 pub fn handle_pptx(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
-    if request.method() == Method::OPTIONS {
+    if *request.method() == Method::OPTIONS {
         return preflight();
     }
 
