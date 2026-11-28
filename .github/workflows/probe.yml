@@ -1,0 +1,12 @@
+name: release
+on:
+  push:
+    branches: [main, feat/tauri-migration]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: probe
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
