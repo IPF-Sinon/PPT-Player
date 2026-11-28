@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react'
-import type { AppSettings } from '@shared/types'
+import type { AppSettings, CategoryBinding, DocumentCategory } from '@shared/types'
 import { zh } from '@shared/strings.zh'
 import { Close } from './icons'
 import { platform } from '../platform/api'
+
+/** The categories a user can bind, with the label shown beside each. */
+const CATEGORY_LABELS: Array<{ key: DocumentCategory; label: string }> = [
+  { key: 'ppt', label: '演示文稿' },
+  { key: 'pdf', label: 'PDF' },
+  { key: 'docx', label: 'Word 文档' },
+  { key: 'xls', label: 'Excel 表格' }
+]
 
 interface SettingsSheetProps {
   open: boolean
@@ -176,6 +184,71 @@ export function SettingsSheet({ open, onClose, onSaved }: SettingsSheetProps) {
               checked={settings?.enableTransitions ?? true}
               disabled={busy || !settings}
               onChange={(e) => void patch({ enableTransitions: e.target.checked })}
+            />
+          </div>
+
+          {/* One binding per category: a deck is presented, a document is read. */}
+          {CATEGORY_LABELS.map(({ key, label }) => {
+            const binding = settings?.bindings?.[key]
+            const setBinding = (next: Partial<CategoryBinding>): void => {
+              if (!settings) return
+              void patch({
+                bindings: {
+                  ...settings.bindings,
+                  [key]: { ...binding!, ...next }
+                }
+              })
+            }
+            return (
+              <div className="sheet-row" key={key}>
+                <div>
+                  <label>{label}</label>
+                  <p className="sheet-hint">默认视图与工具栏样式</p>
+                </div>
+                <div className="sheet-actions">
+                  <select
+                    className="sheet-select"
+                    data-testid={'view-mode-' + key}
+                    value={binding?.viewMode ?? 'slide'}
+                    disabled={busy || !binding}
+                    onChange={(e) =>
+                      setBinding({
+                        viewMode: e.target.value === 'single-column' ? 'single-column' : 'slide'
+                      })
+                    }
+                  >
+                    <option value="slide">幻灯片</option>
+                    <option value="single-column">单列竖屏</option>
+                  </select>
+                  <select
+                    className="sheet-select"
+                    data-testid={'toolbar-style-' + key}
+                    value={binding?.toolbarStyle ?? 'bar'}
+                    disabled={busy || !binding}
+                    onChange={(e) =>
+                      setBinding({ toolbarStyle: e.target.value === 'fab' ? 'fab' : 'bar' })
+                    }
+                  >
+                    <option value="bar">标准底栏</option>
+                    <option value="fab">悬浮球</option>
+                  </select>
+                </div>
+              </div>
+            )
+          })}
+
+          <div className="sheet-row">
+            <div>
+              <label htmlFor="autostart">开机自启动</label>
+              <p className="sheet-hint">后台预加载，让课堂上双击文件立即打开</p>
+            </div>
+            <input
+              id="autostart"
+              type="checkbox"
+              data-testid="autostart"
+              checked={settings?.autostart ?? false}
+              disabled={busy || !settings}
+              onChange={(e) => void patch({ autostart: e.target.checked })}
             />
           </div>
 
