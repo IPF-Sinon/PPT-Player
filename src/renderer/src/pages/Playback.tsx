@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
-import type { InkPage, InkStroke } from '@shared/types'
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react'
+import type {
+  CategoryBinding,
+  DocumentCategory,
+  InkPage,
+  InkStroke,
+  ToolbarStyle,
+  ViewMode
+} from '@shared/types'
+import { extensionOf } from '@shared/formats'
 import { zh } from '@shared/strings.zh'
 import { useAppStore } from '../store'
 import { RenderQueue, renderPageToCanvas } from '../lib/render'
@@ -20,11 +28,60 @@ import { BoardPager } from '../components/BoardPager'
 import { InkLayer } from '../components/InkLayer'
 import { Whiteboard } from '../components/Whiteboard'
 import { PptxTransition } from '../components/PptxTransition'
+import {
+  NativePageCanvas,
+  PageCanvas,
+  SingleColumnView,
+  type PageBox,
+  type SingleColumnController
+} from '../components/SingleColumnView'
+import { FloatingBallToolbar, type FabPosition } from '../components/FloatingBallToolbar'
 import '../styles/playback.css'
 import '../styles/pptx.css'
 import { platform } from '../platform/api'
 
 const IDLE_MS = 2500
+
+/** The ball position, kept locally because the settings record has no field for it. */
+const FAB_POSITION_KEY = 'ppt-player.fab-position'
+
+/** Reading a show opens with, before the saved binding is known. */
+const FALLBACK_BINDING: CategoryBinding = { viewMode: 'slide', toolbarStyle: 'bar' }
+
+/**
+ * Which reading behaviour a file gets.
+ *
+ * The extension is enough: the tab has already been opened by the time playback
+ * runs, so the format was accepted, and the four categories are the four ways a file
+ * is meant to be read rather than four ways of decoding it.
+ */
+function categoryOf(filePath: string): DocumentCategory {
+  const ext = extensionOf(filePath)
+  if (ext === 'pdf') return 'pdf'
+  if (ext === 'doc' || ext === 'docx' || ext === 'docm') return 'docx'
+  if (ext === 'xls' || ext === 'xlsx' || ext === 'xlsm') return 'xls'
+  return 'ppt'
+}
+
+function readFabPosition(): FabPosition | null {
+  try {
+    const raw = window.localStorage.getItem(FAB_POSITION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<FabPosition>
+    if (typeof parsed.x !== 'number' || typeof parsed.y !== 'number') return null
+    return { x: parsed.x, y: parsed.y }
+  } catch {
+    return null
+  }
+}
+
+function writeFabPosition(position: FabPosition): void {
+  try {
+    window.localStorage.setItem(FAB_POSITION_KEY, JSON.stringify(position))
+  } catch {
+    // A webview with storage disabled simply forgets the spot; nothing to do.
+  }
+}
 
 export default function PlaybackPage() {
   const tabs = useAppStore((s) => s.tabs)
@@ -57,6 +114,17 @@ export default function PlaybackPage() {
   /** Per-trigger progress, reset whenever the page changes. */
   const [triggerProgress, setTriggerProgress] = useState<Record<string, number>>({})
   const [transitionsOn, setTransitionsOn] = useState(true)
+  /**
+   * How this show is read.
+   *
+   * One piece of state rather than two: the view mode and the toolbar style are
+   * written back together, and keeping them apart let the two drift during a switch.
+   * Seeded from the category binding as soon as settings arrive.
+   */
+  const [binding, setBinding] = useState<CategoryBinding>(FALLBACK_BINDING)
+  const { viewMode, toolbarStyle } = binding
+  const [ballOpen, setBallOpen] = useState(false)
+  const [fabPosition, setFabPosition] = useState<FabPosition | null>(() => readFabPosition())
 
   const frameRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -67,6 +135,8 @@ export default function PlaybackPage() {
   const historyRef = useRef<Record<number, HistoryEntry>>({})
   /** Ink as it was when the show started, so "discard" can roll back. */
   const inkAtEntry = useRef<InkPage[]>([])
+  /** The column view's imperative handle, used to follow the current page. */
+  const columnRef = useRef<SingleColumnController | null>(null)
 
   const isNative = tab?.engineMode === 'native-pptx'
   const pageIndex = tab?.currentPage ?? 0
@@ -86,8 +156,10 @@ export default function PlaybackPage() {
     // While a pen or eraser is active the bar stays put, so the presenter never
     // loses the undo button in the middle of writing.
     if (keepToolbar && tool !== 'pointer') return
+    // An open menu is a decision in progress: fading it out mid-reach would be rude.
+    if (ballOpen) return
     idleTimer.current = window.setTimeout(() => setChromeVisible(false), IDLE_MS)
-  }, [keepToolbar, tool])
+  }, [keepToolbar, tool, ballOpen])
 
   /** Load the slide the presenter is on, parsing it if this is the first visit. */
   useEffect(() => {
@@ -165,6 +237,35 @@ export default function PlaybackPage() {
     }
   }, [pokeChrome])
 
+  /**
+   * Follow the current page in the column view.
+   *
+   * The keyboard and the side navigation move the tab, not the scroller, so the
+   * column has to be told; and because it is told the same way the column tells the
+   * tab, both directions converge instead of fighting each other.
+   */
+  useEffect(() => {
+    if (viewMode !== 'single-column') return
+    columnRef.current?.scrollToPage(pageIndex)
+  }, [viewMode, pageIndex])
+
+  /**
+   * The eraser footprint in the column view.
+   *
+   * The stage tracks the pointer on its own wrapper, but the column is a scroller
+   * with many pages, so the position is taken from the window instead. Without this
+   * the eraser works in the column and shows no circle at all.
+   */
+  useEffect(() => {
+    if (viewMode !== 'single-column' || tool !== 'eraser') {
+      setEraserAt(null)
+      return
+    }
+    const onMove = (event: MouseEvent): void => setEraserAt({ x: event.clientX, y: event.clientY })
+    window.addEventListener('mousemove', onMove)
+    return () => window.removeEventListener('mousemove', onMove)
+  }, [viewMode, tool])
+
   // One stable key listener reading the latest handlers through a ref.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -189,6 +290,10 @@ export default function PlaybackPage() {
           state.prev()
           return
         case 'Escape':
+          if (state.ballOpen) {
+            setBallOpen(false)
+            return
+          }
           if (state.boardOpen) {
             setBoardOpen(false)
             return
@@ -302,21 +407,33 @@ export default function PlaybackPage() {
     [activeTabId]
   )
 
-  const commitStroke = useCallback(
-    (stroke: InkStroke): void => {
+  /**
+   * Record a finished stroke against the page it was drawn on.
+   *
+   * The page is a parameter rather than the current page index: in the column view
+   * every page carries its own ink layer, and the reader may draw on any of them.
+   */
+  const commitStrokeOn = useCallback(
+    (page: number, stroke: InkStroke): void => {
       const current = useAppStore.getState().tabs.find((t) => t.tabId === activeTabId)
       if (!current) return
-      const exists = current.ink.some((p) => p.pageIndex === pageIndex)
+      const pageStrokes = current.ink.find((p) => p.pageIndex === page)?.strokes ?? []
+      const exists = current.ink.some((p) => p.pageIndex === page)
       const nextPages = exists
-        ? current.ink.map((p) => (p.pageIndex === pageIndex ? { ...p, strokes: [...p.strokes, stroke] } : p))
-        : [...current.ink, { pageIndex, strokes: [stroke] }]
+        ? current.ink.map((p) => (p.pageIndex === page ? { ...p, strokes: [...p.strokes, stroke] } : p))
+        : [...current.ink, { pageIndex: page, strokes: [stroke] }]
       // Remember the pre-stroke state so undo can step back through history.
-      const entry = historyRef.current[pageIndex] ?? initHistory<InkStroke>(currentStrokes)
-      historyRef.current[pageIndex] = commitHistory(entry, [...currentStrokes, stroke])
+      const entry = historyRef.current[page] ?? initHistory<InkStroke>(pageStrokes)
+      historyRef.current[page] = commitHistory(entry, [...pageStrokes, stroke])
       persistInk(nextPages)
       setInkDirty(true)
     },
-    [activeTabId, pageIndex, persistInk, currentStrokes]
+    [activeTabId, persistInk]
+  )
+
+  const commitStroke = useCallback(
+    (stroke: InkStroke): void => commitStrokeOn(pageIndex, stroke),
+    [commitStrokeOn, pageIndex]
   )
 
   /** Step back one history entry. Clearing is undoable exactly like a stroke. */
@@ -409,14 +526,20 @@ export default function PlaybackPage() {
       setNavPosition(settings.navButtonPosition === 'side' ? 'side' : 'bottom')
       setKeepToolbar(settings.keepToolbarInInkMode !== false)
       setInkOnExit(settings.inkOnExit ?? 'ask')
+      // The category decides how the file is read: a deck presents a slide at a
+      // time, a document reads as one column. Older settings files carry no
+      // bindings at all, so the fallback stays a slide with the familiar bar.
+      const category = categoryOf(tab?.filePath ?? '')
+      setBinding(settings.bindings?.[category] ?? FALLBACK_BINDING)
     })()
     return () => {
       cancelled = true
     }
-  }, [])
+    // Read once per show; the category cannot change without a new tab.
+  }, [tab?.filePath])
 
-  const stateRef = useRef({ next, prev, boardOpen, exitShow, exitNow, tab })
-  stateRef.current = { next, prev, boardOpen, exitShow, exitNow, tab }
+  const stateRef = useRef({ next, prev, boardOpen, ballOpen, exitShow, exitNow, tab })
+  stateRef.current = { next, prev, boardOpen, ballOpen, exitShow, exitNow, tab }
 
   useEffect(() => {
     return platform().onPlayState((state) => {
@@ -424,6 +547,103 @@ export default function PlaybackPage() {
       if (!state.active) exitNow()
     })
   }, [exitNow])
+
+  /**
+   * Switching the reading mode or the toolbar from inside the show.
+   *
+   * The choice is written back to the category binding, so the next file of the same
+   * kind opens the way this one was left. It is written only when it really changed,
+   * otherwise every show would rewrite the settings file on its first frame.
+   */
+  const persistBinding = useCallback(
+    (next: Partial<CategoryBinding>): void => {
+      const category = categoryOf(tab?.filePath ?? '')
+      setBinding((previous) => {
+        const merged: CategoryBinding = { ...previous, ...next }
+        void (async () => {
+          try {
+            const settings = await platform().getSettings()
+            const current = settings.bindings?.[category]
+            // Only a real change is written: every show would otherwise rewrite the
+            // settings file the first time a menu was touched.
+            if (current && current.viewMode === merged.viewMode && current.toolbarStyle === merged.toolbarStyle) {
+              return
+            }
+            await platform().setSettings({ bindings: { ...settings.bindings, [category]: merged } })
+          } catch {
+            // A failed settings write must not end the show; the switch still applies.
+          }
+        })()
+        return merged
+      })
+    },
+    [tab?.filePath]
+  )
+
+  const chooseViewMode = useCallback(
+    (mode: ViewMode): void => {
+      setBallOpen(false)
+      setPopover(null)
+      persistBinding({ viewMode: mode })
+      pokeChrome()
+    },
+    [persistBinding, pokeChrome]
+  )
+
+  const chooseToolbarStyle = useCallback(
+    (style: ToolbarStyle): void => {
+      setBallOpen(false)
+      setPopover(null)
+      persistBinding({ toolbarStyle: style })
+      pokeChrome()
+    },
+    [persistBinding, pokeChrome]
+  )
+
+  /** A stroke is starting, so the ball collapses instead of sitting in the way. */
+  const collapseBall = useCallback((): void => {
+    setBallOpen(false)
+  }, [])
+
+  /** Pages of the column view, drawn by the same PDF renderer the stage uses. */
+  const renderColumnPage = useCallback(
+    (index: number, box: PageBox): ReactNode => {
+      if (isNative) {
+        return tab?.nativeDeck ? <NativePageCanvas deck={tab.nativeDeck} pageIndex={index} /> : null
+      }
+      if (!doc) return null
+      return (
+        <PageCanvas
+          doc={doc}
+          pageIndex={index}
+          width={box.width}
+          height={box.height}
+          zoom={box.zoom}
+          queue={queue}
+        />
+      )
+    },
+    [isNative, tab?.nativeDeck, doc, queue]
+  )
+
+  const strokesOfPage = useCallback(
+    (index: number): InkStroke[] => tab?.ink.find((p) => p.pageIndex === index)?.strokes ?? [],
+    [tab?.ink]
+  )
+
+  /**
+   * The column decided which page the reader is on.
+   *
+   * The tab follows it, so the page indicator, the ink history and the next stroke
+   * all agree with what is on screen. It is a plain function, not a memoised one:
+   * the column holds it in a ref and never needs a new identity.
+   */
+  const onColumnPage = (index: number): void => {
+    if (!activeTabId) return
+    const current = useAppStore.getState().tabs.find((t) => t.tabId === activeTabId)
+    if (!current || current.currentPage === index) return
+    useAppStore.getState().setPage(activeTabId, index)
+  }
 
   const onStageClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
     if (tool !== 'pointer' || boardOpen) return
@@ -449,61 +669,94 @@ export default function PlaybackPage() {
     setBoardPages((pages) => pages.map((page, i) => (i === boardPageIndex ? next : page)))
   }, [boardPageIndex])
 
+  const singleColumn = viewMode === 'single-column'
+
   return (
-    <div className="playback" data-testid="playback-page" data-board={boardOpen} onMouseMove={pokeChrome}>
-      <div
-        className="slide-wrap"
-        onClick={onStageClick}
-        onMouseMove={(event) => {
-          if (tool === 'eraser') setEraserAt({ x: event.clientX, y: event.clientY })
-          else if (eraserAt) setEraserAt(null)
-          pokeChrome()
-        }}
-        onMouseLeave={() => setEraserAt(null)}
-        role="presentation"
-      >
+    <div
+      className="playback"
+      data-testid="playback-page"
+      data-board={boardOpen}
+      data-view={viewMode}
+      data-toolbar={toolbarStyle}
+      onMouseMove={pokeChrome}
+    >
+      {singleColumn ? (
+        <SingleColumnView
+          category={categoryOf(tab?.filePath ?? '')}
+          binding={{ viewMode, toolbarStyle }}
+          pageCount={pageCount}
+          pageSizes={tab?.pageSizes ?? []}
+          renderPage={renderColumnPage}
+          strokesOf={strokesOfPage}
+          drawing={tool === 'pen' || tool === 'eraser'}
+          tool={tool === 'eraser' ? 'eraser' : 'pen'}
+          color={penColor}
+          widthPx={penWidth}
+          onCommitStroke={commitStrokeOn}
+          initialPage={pageIndex}
+          onVisiblePage={onColumnPage}
+          onStrokeStart={collapseBall}
+          controllerRef={columnRef}
+        />
+      ) : (
         <div
-          className="slide-frame"
-          ref={frameRef}
-          data-testid="slide-frame"
-          data-engine={isNative ? 'native-pptx' : 'pdf'}
-          data-painted={isNative ? slide !== null : painted}
-          style={{ ['--slide-ratio' as string]: String(ratio) }}
+          className="slide-wrap"
+          onClick={onStageClick}
+          onPointerDown={() => {
+            // The same rule as the column: a stroke starting puts the ball away.
+            if (tool === 'pen' || tool === 'eraser') collapseBall()
+          }}
+          onMouseMove={(event) => {
+            if (tool === 'eraser') setEraserAt({ x: event.clientX, y: event.clientY })
+            else if (eraserAt) setEraserAt(null)
+            pokeChrome()
+          }}
+          onMouseLeave={() => setEraserAt(null)}
+          role="presentation"
         >
-          {isNative && slide ? (
-            <PptxTransition
-              slide={slide}
-              step={step}
-              transition={slide.transition}
-              enabled={transitionsOn}
-              slideKey={tab.tabId + ':' + pageIndex}
-              triggerProgress={triggerProgress}
-              inkActive={tool !== 'pointer'}
-              onTrigger={(triggerId) => {
-                const track = slide.triggers[triggerId]
-                if (!track) return
-                const done = triggerProgress[triggerId] ?? 0
-                // Clicking past the last step either restarts the track or holds it.
-                const nextStep = done >= track.steps.length ? (track.restart ? 1 : done) : done + 1
-                setTriggerProgress((prev) => ({ ...prev, [triggerId]: nextStep }))
-                pokeChrome()
-              }}
+          <div
+            className="slide-frame"
+            ref={frameRef}
+            data-testid="slide-frame"
+            data-engine={isNative ? 'native-pptx' : 'pdf'}
+            data-painted={isNative ? slide !== null : painted}
+            style={{ ['--slide-ratio' as string]: String(ratio) }}
+          >
+            {isNative && slide ? (
+              <PptxTransition
+                slide={slide}
+                step={step}
+                transition={slide.transition}
+                enabled={transitionsOn}
+                slideKey={tab.tabId + ':' + pageIndex}
+                triggerProgress={triggerProgress}
+                inkActive={tool !== 'pointer'}
+                onTrigger={(triggerId) => {
+                  const track = slide.triggers[triggerId]
+                  if (!track) return
+                  const done = triggerProgress[triggerId] ?? 0
+                  // Clicking past the last step either restarts the track or holds it.
+                  const nextStep = done >= track.steps.length ? (track.restart ? 1 : done) : done + 1
+                  setTriggerProgress((prev) => ({ ...prev, [triggerId]: nextStep }))
+                  pokeChrome()
+                }}
+              />
+            ) : (
+              <canvas ref={canvasRef} data-testid="playback-canvas" />
+            )}
+            <InkLayer
+              boxWidth={box.width}
+              boxHeight={box.height}
+              strokes={currentStrokes}
+              drawing={tool === 'pen' || tool === 'eraser'}
+              tool={tool === 'eraser' ? 'eraser' : 'pen'}
+              color={penColor}
+              widthPx={penWidth}
+              onCommit={commitStroke}
             />
-          ) : (
-            <canvas ref={canvasRef} data-testid="playback-canvas" />
-          )}
-          <InkLayer
-            boxWidth={box.width}
-            boxHeight={box.height}
-            strokes={currentStrokes}
-            drawing={tool === 'pen' || tool === 'eraser'}
-            tool={tool === 'eraser' ? 'eraser' : 'pen'}
-            color={penColor}
-            widthPx={penWidth}
-            onCommit={commitStroke}
-          />
+          </div>
         </div>
-      </div>
+      )}
 
       {boardOpen ? (
         <>
@@ -550,45 +803,96 @@ export default function PlaybackPage() {
         />
       ) : null}
 
-      <PlayToolbar
-        tool={tool}
-        boardOpen={boardOpen}
-        canUndo={boardOpen ? boardStrokes.length > 0 : canUndo(historyRef.current[pageIndex] ?? initHistory())}
-        penColor={penColor}
-        penWidth={penWidth}
-        eraserSize={eraserSize}
-        visible={chromeVisible}
-        popover={popover}
-        hidePaging={navPosition === 'side'}
-        onTool={(nextTool) => {
-          setTool(nextTool)
-          pokeChrome()
-        }}
-        onPopover={setPopover}
-        onPrev={prev}
-        onNext={next}
-        onToggleBoard={() => {
-          setBoardOpen((v) => !v)
-          setPopover(null)
-          pokeChrome()
-        }}
-        onColor={(color) => {
-          setPenColor(color)
-          setTool('pen')
-        }}
-        onWidth={(width) => {
-          setPenWidth(width)
-          setTool('pen')
-        }}
-        onEraserSize={setEraserSize}
-        onUndo={
-          boardOpen
-            ? () => setBoardStrokes(boardStrokes.slice(0, -1))
-            : undoStroke
-        }
-        onClear={boardOpen ? () => setBoardStrokes([]) : clearInk}
-        onEnd={exitShow}
-      />
+      {toolbarStyle === 'fab' ? (
+        <FloatingBallToolbar
+          tool={tool}
+          boardOpen={boardOpen}
+          canUndo={boardOpen ? boardStrokes.length > 0 : canUndo(historyRef.current[pageIndex] ?? initHistory())}
+          penColor={penColor}
+          penWidth={penWidth}
+          eraserSize={eraserSize}
+          visible={chromeVisible}
+          expanded={ballOpen}
+          popover={popover}
+          viewMode={viewMode}
+          toolbarStyle={toolbarStyle}
+          position={fabPosition}
+          onPosition={(next) => {
+            setFabPosition(next)
+            writeFabPosition(next)
+          }}
+          onToggle={() => {
+            setBallOpen((v) => !v)
+            setPopover(null)
+            pokeChrome()
+          }}
+          onTool={(nextTool) => {
+            setTool(nextTool)
+            pokeChrome()
+          }}
+          onPopover={setPopover}
+          onColor={(nextColor) => {
+            setPenColor(nextColor)
+            setTool('pen')
+          }}
+          onWidth={(width) => {
+            setPenWidth(width)
+            setTool('pen')
+          }}
+          onEraserSize={setEraserSize}
+          onUndo={boardOpen ? () => setBoardStrokes(boardStrokes.slice(0, -1)) : undoStroke}
+          onClear={boardOpen ? () => setBoardStrokes([]) : clearInk}
+          onToggleBoard={() => {
+            setBoardOpen((v) => !v)
+            setPopover(null)
+            setBallOpen(false)
+            pokeChrome()
+          }}
+          onViewMode={chooseViewMode}
+          onToolbarStyle={chooseToolbarStyle}
+          onEnd={exitShow}
+        />
+      ) : (
+        <PlayToolbar
+          tool={tool}
+          boardOpen={boardOpen}
+          canUndo={boardOpen ? boardStrokes.length > 0 : canUndo(historyRef.current[pageIndex] ?? initHistory())}
+          penColor={penColor}
+          penWidth={penWidth}
+          eraserSize={eraserSize}
+          visible={chromeVisible}
+          popover={popover}
+          hidePaging={navPosition === 'side'}
+          onTool={(nextTool) => {
+            setTool(nextTool)
+            pokeChrome()
+          }}
+          onPopover={setPopover}
+          onPrev={prev}
+          onNext={next}
+          onToggleBoard={() => {
+            setBoardOpen((v) => !v)
+            setPopover(null)
+            pokeChrome()
+          }}
+          onColor={(color) => {
+            setPenColor(color)
+            setTool('pen')
+          }}
+          onWidth={(width) => {
+            setPenWidth(width)
+            setTool('pen')
+          }}
+          onEraserSize={setEraserSize}
+          onUndo={
+            boardOpen
+              ? () => setBoardStrokes(boardStrokes.slice(0, -1))
+              : undoStroke
+          }
+          onClear={boardOpen ? () => setBoardStrokes([]) : clearInk}
+          onEnd={exitShow}
+        />
+      )}
 
       <ExitInkDialog
         open={exitPrompt}

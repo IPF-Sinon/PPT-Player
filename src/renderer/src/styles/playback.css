@@ -467,3 +467,287 @@
   justify-content: flex-end;
   gap: 8px;
 }
+/* ------------------------------------------------------- single-column view */
+/* Documents read as one continuous column: full width, no side letterboxing, no
+   page-at-a-time stage. The scroller is the only scrolling element, so the scrollbar
+   belongs to the document rather than to a page. */
+.single-column {
+  position: absolute;
+  inset: 0;
+  background: #1b1f26;
+}
+
+.sc-scroller {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* Pinch is handled in JS about the gesture midpoint; the browser's own page zoom
+     would otherwise fight it. */
+  touch-action: pan-x pan-y;
+}
+
+.sc-track {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 0 auto;
+  padding: 18px 0 40px;
+}
+
+/* The page box is sized from JS: height is held even while the page is unmounted,
+   so the scrollbar never jumps when a canvas appears. */
+.sc-page {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
+  background: #fff;
+  box-shadow: 0 2px 18px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.sc-page[data-mounted='false'] {
+  /* A placeholder must not look like an empty white page. */
+  background: #f3f4f6;
+}
+
+.sc-page-inner {
+  position: absolute;
+  inset: 0;
+  line-height: 0;
+}
+
+.sc-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Native slides are laid out at their authored size and scaled into the page box by
+   the same component the stage uses, so text wraps identically in both views. */
+.sc-pptx {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.sc-page-number {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  z-index: 12;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: rgba(18, 22, 30, 0.42);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 11px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.sc-zoom {
+  position: absolute;
+  right: 20px;
+  top: 16px;
+  z-index: 22;
+  padding: 5px 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(18, 22, 30, 0.55);
+  backdrop-filter: blur(14px);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.sc-zoom:hover {
+  background: rgba(18, 22, 30, 0.75);
+}
+
+/* --------------------------------------------------------- floating ball */
+/* The ball lives in a margin and expands inward, so at rest it covers as little of
+   the text as possible. Its hit area stays a full 48px even while it is drawn small
+   and translucent, which is what keeps it usable without it being loud. */
+/* The root is exactly the ball. The menu hangs off it as an absolutely positioned
+   sibling, so a ball snapped to the right edge cannot push its own menu off screen. */
+.fab-root {
+  position: fixed;
+  width: 48px;
+  height: 48px;
+  z-index: 24;
+  transition: opacity 0.28s ease, transform 0.18s ease;
+}
+
+/* At rest the ball is tucked behind the window edge.
+   A document read in a column has text right up to both edges, so any circle floating
+   over the page covers something. Tucked, only a 14px nub shows at the very edge of
+   the window and no line of text is hidden; hovering or expanding pulls the ball back
+   out, and a drag is never tucked. The nub is still a real hit target, so the ball
+   stays one gesture away at all times. */
+.fab-root[data-expanded='false']:not([data-dragging='true']):not(:hover):not(:focus-within) {
+  transform: translateX(var(--fab-tuck, 0));
+}
+
+/* 54px of a 48px ball that sits 20px from the edge leaves a 14px nub on screen. */
+.fab-root[data-side='right'] {
+  --fab-tuck: 54px;
+}
+
+.fab-root[data-side='left'] {
+  --fab-tuck: -54px;
+}
+
+.fab-root[data-visible='false'] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fab-ball {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(18, 22, 30, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(18px) saturate(1.5);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
+  color: rgba(255, 255, 255, 0.92);
+  cursor: grab;
+  touch-action: none;
+  transform: scale(1);
+  opacity: 1;
+  transition: transform 0.16s ease, opacity 0.16s ease, background 0.16s ease;
+}
+
+.fab-root[data-expanded='false'] .fab-ball {
+  transform: scale(0.52);
+  opacity: 0.55;
+}
+
+.fab-root[data-expanded='false'] .fab-ball:hover,
+.fab-root[data-expanded='false'] .fab-ball:focus-visible,
+.fab-root[data-expanded='true'] .fab-ball {
+  transform: scale(1);
+  opacity: 1;
+  background: rgba(18, 22, 30, 0.66);
+}
+
+.fab-root[data-dragging='true'] .fab-ball {
+  cursor: grabbing;
+  transform: scale(1.04);
+  opacity: 1;
+}
+
+/* The dot inside the ball says whether an ink tool is live without needing a label. */
+.fab-ball-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.82);
+  transition: background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.fab-ball-dot[data-active='true'] {
+  background: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+}
+
+/* The menu grows out of the ball towards the middle of the window. */
+.fab-menu {
+  position: absolute;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  padding: 6px;
+  border-radius: 22px;
+  background: rgba(18, 22, 30, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(18px) saturate(1.5);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.36);
+  animation: fab-menu-in 0.14s ease-out;
+}
+
+@keyframes fab-menu-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fab-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.fab-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.fab-item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.fab-item[data-active='true'] {
+  background: rgba(59, 130, 246, 0.9);
+  color: #fff;
+}
+
+/* The two mode switches are words, not icons: a single glyph cannot say 单栏/单页. */
+.fab-item-text {
+  width: auto;
+  min-width: 34px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.fab-item-end:hover {
+  background: rgba(220, 38, 38, 0.85);
+}
+
+.fab-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* The menu grows towards the middle of the window, away from the edge it snapped to. */
+.fab-root[data-side='right'] .fab-menu {
+  right: calc(100% + 10px);
+}
+
+.fab-root[data-side='left'] .fab-menu {
+  left: calc(100% + 10px);
+}
+
+/* The pen and eraser panels anchor to the ball, not to the bar. */
+.fab-root .ink-popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+}
+
+.fab-root[data-side='left'] .ink-popover {
+  left: 0;
+  transform: none;
+}
+
+.fab-root[data-side='right'] .ink-popover {
+  right: 0;
+  left: auto;
+  transform: none;
+}
