@@ -42,7 +42,6 @@ pub fn run() {
     let pending = paths::pending_open_path_from_args(std::env::args().skip(1).collect());
 
     tauri::Builder::default()
-        .plugin(tauri::plugin::Builder::new("ppt").build())
         .manage(commands::AppState::new(pending))
         .register_uri_scheme_protocol("deck", |ctx, request| {
             protocol::handle_deck(ctx.app_handle(), &request)
@@ -89,13 +88,16 @@ pub fn run() {
             .title("PPT 放映器")
             .inner_size(1280.0, 820.0)
             .min_inner_size(960.0, 640.0)
-            .background_color(tauri::window::Color(243, 244, 246, 255))
             .build()?;
 
-            // Leaving fullscreen by any route must put the UI back into preview.
+            // Leaving fullscreen by any route must put the UI back into preview,
+            // otherwise the chrome stays hidden over a normal window.
             let handle = app.handle().clone();
             window.on_window_event(move |event| {
-                if let tauri::WindowEvent::Resized(_) = event {
+                if matches!(
+                    event,
+                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_)
+                ) {
                     commands::emit_play_state(&handle);
                 }
             });
