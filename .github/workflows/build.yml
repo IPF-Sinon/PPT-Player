@@ -165,12 +165,19 @@ jobs:
           }
           if (!targets.includes('nsis')) problems.push('lite build must produce an NSIS installer')
 
-          // Lite must carry no engine; that is the entire point of the variant.
+          // Lite must carry no engine; that is the entire point of the variant. It does
+          // carry the engine manifest, because that file is how a lite install knows
+          // where to download one — banning all resources banned the fix.
           const res = lite.bundle?.resources
-          const empty = res === undefined
-            || (Array.isArray(res) && res.length === 0)
-            || (typeof res === 'object' && Object.keys(res).length === 0)
-          if (!empty) problems.push('lite config must bundle no resources, found ' + JSON.stringify(res))
+          const entries = res === undefined
+            ? []
+            : Array.isArray(res)
+              ? res
+              : Object.values(res)
+          const engineEntry = entries.find((e) => String(e).includes('resources/lo'))
+          if (engineEntry) {
+            problems.push('lite config must not bundle the engine, found ' + JSON.stringify(engineEntry))
+          }
 
           if (lite.mainBinaryName !== 'PPTPlayer') {
             problems.push('mainBinaryName must be PPTPlayer so the installer writes PPTPlayer.exe')

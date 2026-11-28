@@ -389,6 +389,7 @@ pub fn pick_lo_path() -> Option<String> {
 }
 
 /// The engine package this build can download.
+#[derive(Debug, Clone)]
 pub struct EngineSource {
     pub url: String,
     pub sha256: String,
@@ -461,7 +462,7 @@ pub async fn engine_download(app: AppHandle) -> Result<String, String> {
     engine_download::download_engine(
         &app,
         &engine_download::DownloadRequest {
-            url: source.url,
+            url: &source.url,
             sha256: &source.sha256,
             bytes: source.bytes,
             target_dir: &target,

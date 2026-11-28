@@ -44,6 +44,8 @@
     "tests/unit/pptx-trigger-eval.test.ts",
     "tests/unit/pptx-trigger-fixture.test.ts",
     "tests/unit/pptx-exit.test.ts",
-    "tests/unit/ink-history.test.ts"
+    "tests/unit/ink-history.test.ts",
+    "tests/unit/docx-parse.test.ts",
+    "tests/unit/docx-registry.test.ts"
   ]
 }
