@@ -123,6 +123,16 @@
       },
       {
         "ext": [
+          "csv",
+          "tsv"
+        ],
+        "name": "CSV 表格",
+        "description": "逗号分隔的表格文件",
+        "mimeType": "text/csv",
+        "role": "Editor"
+      },
+      {
+        "ext": [
           "pdf"
         ],
         "name": "PDF 文档",

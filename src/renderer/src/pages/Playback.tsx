@@ -28,6 +28,7 @@ import { InkLayer } from '../components/InkLayer'
 import { Whiteboard } from '../components/Whiteboard'
 import { PptxTransition } from '../components/PptxTransition'
 import { DocxView, DocxColumnPage } from '../components/DocxView'
+import { SheetView } from '../components/SheetView'
 import {
   NativePageCanvas,
   PageCanvas,
@@ -132,6 +133,8 @@ export default function PlaybackPage() {
    * drawn by DocxView rather than by the slide stage.
    */
   const isDocx = isNative && categoryOf(tab?.filePath ?? '') === 'docx'
+  /** A spreadsheet drawn natively: a grid, not a page. */
+  const isSheet = isNative && categoryOf(tab?.filePath ?? '') === 'xls'
   const pageIndex = tab?.currentPage ?? 0
   const step = tab?.currentStep ?? 0
   const pageCount = tab?.pageCount ?? 0
@@ -606,6 +609,30 @@ export default function PlaybackPage() {
           <DocxColumnPage deckId={tab.deckId} pageIndex={index} box={box} />
         ) : null
       }
+      if (isSheet) {
+        // The grid is its own scroll surface, so it is drawn at the box's width rather
+        // than scaled into it: a sheet is read by scrolling sideways as well as down.
+        return tab?.deckId ? (
+          <div className="sheet-column-page" style={{ width: box.width }}>
+            <SheetView
+              deckId={tab.deckId}
+              path={tab.filePath}
+              api={platform()}
+              pageIndex={index}
+              onSelectSheet={(sheetIndex) =>
+                activeTabId && useAppStore.getState().setPage(activeTabId, sheetIndex)
+              }
+              strokes={tab?.ink.find((page) => page.pageIndex === index)?.strokes ?? []}
+              drawing={tool === 'pen' || tool === 'eraser'}
+              tool={tool === 'eraser' ? 'eraser' : 'pen'}
+              color={penColor}
+              widthPx={penWidth}
+              onCommitStroke={(stroke) => commitStrokeOn(index, stroke)}
+              onStrokeStart={collapseBall}
+            />
+          </div>
+        ) : null
+      }
       if (isNative) {
         return tab?.nativeDeck ? <NativePageCanvas deck={tab.nativeDeck} pageIndex={index} /> : null
       }
@@ -621,7 +648,23 @@ export default function PlaybackPage() {
         />
       )
     },
-    [isNative, isDocx, tab?.nativeDeck, tab?.deckId, doc, queue]
+    [
+      isNative,
+      isDocx,
+      isSheet,
+      tab?.nativeDeck,
+      tab?.deckId,
+      tab?.filePath,
+      tab?.ink,
+      activeTabId,
+      doc,
+      queue,
+      tool,
+      penColor,
+      penWidth,
+      commitStrokeOn,
+      collapseBall
+    ]
   )
 
   const strokesOfPage = useCallback(

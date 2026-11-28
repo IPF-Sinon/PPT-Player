@@ -16,7 +16,10 @@ export const SUPPORTED_EXTENSIONS = [
   'doc',
   'xlsx',
   'xlsm',
-  'xls'
+  'xls',
+  // A CSV has no container and no signature, but it is a table and the lite build
+  // opens it natively, so it belongs in the list of formats the app accepts.
+  'csv'
 ] as const
 
 export type SupportedExtension = (typeof SUPPORTED_EXTENSIONS)[number]
@@ -68,5 +71,37 @@ export function categoryOf(filePath: string): DocumentCategory {
   if (ext === 'pdf') return 'pdf'
   if (ext === 'doc' || ext === 'docx' || ext === 'docm' || ext === 'dot' || ext === 'dotx') return 'docx'
   if (ext === 'xls' || ext === 'xlsx' || ext === 'xlsm' || ext === 'xlt' || ext === 'xltx') return 'xls'
+  // A CSV is read as a sheet, so it gets the sheet's binding: the single-column view
+  // and the floating toolbar, which is what a table is read with.
+  if (ext === 'csv' || ext === 'tsv') return 'xls'
   return 'ppt'
+}
+
+/**
+ * The short badge label for a file, naming what it actually is.
+ *
+ * Derived from the extension, not from the engine. The badge used to be written as
+ * "native means PPTX", which labelled a .docx and a .csv as a deck: both are native, and
+ * neither is a presentation. Telling a reader their spreadsheet is a PPTX is a small lie
+ * with a real cost, because it is the one piece of text that says what they opened.
+ *
+ * An extension this build does not know falls back to the engine's own wording, so the
+ * badge is never blank.
+ */
+export function formatLabel(filePath: string, native: boolean, engineMode: string): string {
+  const ext = extensionOf(filePath)
+  if (ext === 'pdf') return 'PDF'
+  if (ext === 'csv') return 'CSV'
+  if (ext === 'tsv') return 'TSV'
+  if (ext === 'docx' || ext === 'docm' || ext === 'dotx') return 'DOCX'
+  if (ext === 'doc' || ext === 'dot') return 'DOC'
+  if (ext === 'xlsx' || ext === 'xlsm' || ext === 'xltx') return 'XLSX'
+  if (ext === 'xls' || ext === 'xlt') return 'XLS'
+  if (ext === 'pptx' || ext === 'pptm' || ext === 'ppsx' || ext === 'ppsm' || ext === 'potx') {
+    return 'PPTX'
+  }
+  if (ext === 'ppt' || ext === 'pps' || ext === 'pot') return 'PPT'
+  if (ext === 'odp') return 'ODP'
+  if (native) return 'PPTX'
+  return engineMode === 'pdf' ? 'PDF' : '已转换'
 }

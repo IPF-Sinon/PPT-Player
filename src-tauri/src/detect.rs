@@ -106,6 +106,17 @@ pub fn detect(path: &Path) -> FormatInfo {
                 _ => (DeckKind::LegacyPpt, false, None),
             }
         }
+        // A CSV has no signature at all, so the container cannot identify it and the
+        // extension is the only evidence there is. Without this a .csv was reported as
+        // unsupported and could not be opened on the lite build, where there is no
+        // engine to fall back to.
+        //
+        // The extension alone decides, deliberately: sniffing the first line for a comma
+        // would claim every unknown text file as a sheet, and a .txt the user meant to
+        // read as text is far more common than a table saved with no extension.
+        ContainerKind::Unknown if crate::spreadsheet::is_delimited_ext(&ext) => {
+            (DeckKind::OoxmlSheet, false, None)
+        }
         ContainerKind::Unknown => (
             DeckKind::Unsupported,
             false,
@@ -119,7 +130,9 @@ pub fn detect(path: &Path) -> FormatInfo {
         DeckKind::LegacyPpt => &["ppt", "pps", "pot"],
         DeckKind::OoxmlDocument => &["docx", "docm", "dotx"],
         DeckKind::LegacyDoc => &["doc", "dot"],
-        DeckKind::OoxmlSheet => &["xlsx", "xlsm", "xltx"],
+        // A delimited text table is a sheet too, so a .csv is not reported as a file
+        // whose name disagrees with its content.
+        DeckKind::OoxmlSheet => &["xlsx", "xlsm", "xltx", "csv", "tsv"],
         DeckKind::LegacySheet => &["xls", "xlt", "xla"],
         DeckKind::EncryptedOoxml => &[
             "pptx", "pptm", "ppsx", "docx", "docm", "xlsx", "xlsm",
@@ -132,12 +145,28 @@ pub fn detect(path: &Path) -> FormatInfo {
     FormatInfo {
         kind,
         container,
-        declared_ext: ext,
+        declared_ext: ext.clone(),
         ext_mismatch,
         encrypted,
-        label: label_for(kind).to_string(),
+        label: label_for_sheet(kind, &ext),
         reason,
     }
+}
+
+/// The label shown to the user.
+///
+/// A delimited text table and an OOXML workbook are both opened as a sheet, but calling
+/// a .csv an XLSX would be a lie the user can see: the label names what the file
+/// actually is.
+fn label_for_sheet(kind: DeckKind, ext: &str) -> String {
+    if kind == DeckKind::OoxmlSheet {
+        return match ext {
+            "csv" => "CSV".to_string(),
+            "tsv" => "TSV".to_string(),
+            _ => label_for(kind).to_string(),
+        };
+    }
+    label_for(kind).to_string()
 }
 
 #[cfg(test)]
@@ -207,6 +236,40 @@ mod tests {
         let info = detect(&path);
         assert_eq!(info.kind, DeckKind::Unsupported);
         assert!(info.reason.is_some());
+    }
+
+    #[test]
+    fn recognises_a_csv_as_a_sheet() {
+        // A CSV has no signature, so this is the extension alone. Without it the file
+        // was reported unsupported and could not be opened on the lite build at all.
+        let (_d, path) = write("成绩.csv", b"\xD0\xD5\xC3\xFB,\xB7\xD6\xCA\xFD\r\n");
+        let info = detect(&path);
+        assert_eq!(info.kind, DeckKind::OoxmlSheet);
+        assert_eq!(info.container, ContainerKind::Unknown);
+        assert!(!info.encrypted);
+        // The name matches the content, so it is not a mismatch.
+        assert!(!info.ext_mismatch);
+    }
+
+    #[test]
+    fn a_csv_is_labelled_csv_and_not_xlsx() {
+        // The label is the one piece of text that tells the reader what they opened, so
+        // calling their csv an xlsx would be a visible lie.
+        let (_d, path) = write("a.csv", b"a,b\n1,2\n");
+        assert_eq!(detect(&path).label, "CSV");
+        let (_d2, tsv) = write("a.tsv", b"a\tb\n");
+        assert_eq!(detect(&tsv).label, "TSV");
+        // A real workbook keeps its own label.
+        let (_d3, xlsx) = write("a.xlsx", b"PK\x03\x04rest");
+        assert_eq!(detect(&xlsx).label, "XLSX");
+    }
+
+    #[test]
+    fn a_text_file_is_still_not_a_sheet() {
+        // Plain .txt is deliberately excluded: claiming it would stop a text file
+        // opening at all, and prose is the commoner case.
+        let (_d, path) = write("notes.txt", b"a,b,c\n1,2,3\n");
+        assert_eq!(detect(&path).kind, DeckKind::Unsupported);
     }
 
     #[test]

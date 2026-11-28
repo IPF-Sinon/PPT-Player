@@ -38,6 +38,7 @@ import type {
   OpenResult,
   ProbeResult
 } from '@shared/types'
+import type { SheetRequest, SpreadsheetModel } from '../lib/sheet/types'
 
 /** Everything the renderer needs from its host. */
 export interface PlatformApi {
@@ -45,6 +46,14 @@ export interface PlatformApi {
   probe(path: string): Promise<ProbeResult>
   open(path: string): Promise<OpenResult>
   openNative(path: string): Promise<NativeOpenResult | null>
+  /**
+   * Read a window of one sheet of a spreadsheet.
+   *
+   * Separate from openNative because a spreadsheet is not a ZIP of OOXML parts the
+   * renderer can parse: calamine reads it on the Rust side and the model crosses IPC
+   * once. See src/renderer/src/lib/sheet/types.ts for the shape.
+   */
+  openSpreadsheet(path: string, request?: SheetRequest): Promise<SpreadsheetModel>
   cancelOpen(): Promise<void>
   closeDeck(deckId: string): Promise<unknown>
   reportMetrics(
@@ -217,6 +226,14 @@ const tauriApi: PlatformApi = {
       format: probe.ok ? probe.format : ooxmlFormat(path)
     }
   },
+
+  openSpreadsheet: (path, request) =>
+    call<SpreadsheetModel>('open_spreadsheet', {
+      path,
+      sheet: request?.sheet ?? null,
+      firstRow: request?.firstRow ?? null,
+      rowCount: request?.rowCount ?? null
+    }),
 
   cancelOpen: () => call<void>('cancel_open'),
   closeDeck: (deckId) => call<unknown>('close_deck', { deckId }),

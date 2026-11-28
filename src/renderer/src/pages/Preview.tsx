@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { zh } from '@shared/strings.zh'
-import { categoryOf } from '@shared/formats'
+import { categoryOf, formatLabel } from '@shared/formats'
 import { useAppStore } from '../store'
 import { loadPdf, preloadPdfjs, readFirstPageSize, readPageSizes } from '../lib/pdf'
 import { RenderQueue } from '../lib/render'
 import { loadNativeDeck } from '../lib/pptx/deck'
 import { forgetDocx, prepareDocx } from '../lib/docx/registry'
+import { forgetSheet, loadSheet } from '../lib/sheet/registry'
 import { DocxView } from '../components/DocxView'
+import { SheetView } from '../components/SheetView'
 import { ThumbRail } from '../components/ThumbRail'
 import { SlideStage } from '../components/SlideStage'
 import { PptxSlideView } from '../components/PptxSlideView'
@@ -56,6 +58,7 @@ export default function PreviewPage() {
       // file's path, size and mtime: closing the deck must drop the parsed copy, or
       // an edited file would be reopened from a stale parse.
       forgetDocx(target.deckId)
+      forgetSheet(target.deckId)
       await platform().closeDeck(target.deckId)
     }
   }, [])
@@ -133,6 +136,34 @@ export default function PreviewPage() {
       })
 
       try {
+        // A spreadsheet is not a ZIP of OOXML parts the renderer can parse: calamine
+        // reads it on the Rust side, so it is opened through its own call and never
+        // reaches open_native. On the lite build there is no engine, so this is the
+        // only path that can succeed at all.
+        if (categoryOf(filePath) === 'xls') {
+          update(tabId, { progressMessage: '正在读取表格', progressRatio: 0.4 })
+          // Keyed by path rather than by deck id: the id is computed on the Rust side
+          // and only arrives with the model, so the path is the only thing known here.
+          const book = await loadSheet(filePath, platform(), filePath, {})
+          if (token !== openToken.current) return
+          // One page per worksheet: a workbook is a set of sheets, and the tab bar is
+          // the sheet selector, so the page count is the sheet count.
+          update(tabId, {
+            engineMode: 'native-pptx',
+            deckId: book.deckId,
+            nativeDeck: null,
+            pageCount: Math.max(1, book.sheets.length),
+            pageSizes: [],
+            status: 'ready',
+            progressRatio: 1,
+            convertMs: 0
+          })
+          const ink = await platform().loadInk(book.deckId)
+          update(tabId, { ink })
+          document.title = zh.windowTitle(existing?.title ?? '')
+          return
+        }
+
         // Native first: a PPTX needs no conversion at all.
         update(tabId, { progressMessage: '正在建立索引', progressRatio: 0.2 })
         const native = await platform().openNative(filePath)
@@ -395,6 +426,8 @@ export default function PreviewPage() {
    * every branch that assumes a deck has to know the difference.
    */
   const isDocx = isNative && categoryOf(tab?.filePath ?? '') === 'docx'
+  /** A spreadsheet drawn natively: no slides either, and no page stage. */
+  const isSheet = isNative && categoryOf(tab?.filePath ?? '') === 'xls'
   const nativeDeck = isNative && !isDocx ? tab?.nativeDeck ?? null : null
   const currentSlide = nativeDeck?.slides[pageIndex] ?? null
 
@@ -445,6 +478,24 @@ export default function PreviewPage() {
                 deckId={tab.deckId}
                 pageIndex={pageIndex}
                 fit
+                onDoubleClick={() => void startShow()}
+              />
+            ) : isSheet ? (
+              // A spreadsheet is drawn as a grid, with the page index selecting the
+              // sheet tab rather than a page within it.
+              <SheetView
+                deckId={tab.deckId}
+                path={tab.filePath}
+                api={platform()}
+                pageIndex={pageIndex}
+                onSelectSheet={(index) => useAppStore.getState().setPage(tab.tabId, index)}
+                fit
+                strokes={tab.ink.find((page) => page.pageIndex === pageIndex)?.strokes ?? []}
+                drawing={false}
+                tool="pen"
+                color="#ef4444"
+                widthPx={2}
+                onCommitStroke={() => undefined}
                 onDoubleClick={() => void startShow()}
               />
             ) : isNative && currentSlide ? (
@@ -567,12 +618,16 @@ export default function PreviewPage() {
 
         {tab && tab.status === 'ready' ? (
           <div className="bottombar-group">
+            {/* The badge names what the file IS, taken from the extension rather than
+                from the engine. Deriving it from isNative labelled every native format
+                PPTX: a .csv and a .docx were both reported as a deck, which tells the
+                reader something false about their own file. */}
             <span className="badge" data-testid="deck-format">
-              {isDocx ? 'DOCX' : isNative ? 'PPTX' : tab.engineMode === 'pdf' ? 'PDF' : '已转换'}
+              {formatLabel(tab.filePath, isNative, tab.engineMode)}
             </span>
             {isNative ? (
               <span className="badge badge-soft" data-testid="engine-badge">
-                {isDocx ? '原生渲染' : '极速动画'}
+                {isDocx || isSheet ? '原生渲染' : '极速动画'}
               </span>
             ) : null}
             {tab.hasComplexObjects ? (

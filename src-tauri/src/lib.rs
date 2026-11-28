@@ -13,6 +13,7 @@
 //! - zip_vfs      random access into a ZIP without extracting it
 //! - protocol     deck:// and pptx:// with Range support
 //! - index_parse  OOXML presentation index
+//! - spreadsheet  native .xls / .xlsx / .csv parsing, with no engine
 //! - engine_*     locating, probing, downloading, and running LibreOffice
 //! - convert      the conversion pipeline and its cache
 //! - settings     persisted preferences
@@ -31,6 +32,7 @@ pub mod log;
 pub mod paths;
 pub mod protocol;
 pub mod settings;
+pub mod spreadsheet;
 pub mod types;
 pub mod zip_vfs;
 
@@ -108,6 +110,7 @@ pub fn run() {
             commands::probe,
             commands::open,
             commands::open_native,
+            commands::open_spreadsheet,
             commands::cancel_open,
             commands::close_deck,
             commands::report_metrics,

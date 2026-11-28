@@ -36,6 +36,11 @@ tauri-plugin-single-instance = "2"
 # Preload at login: registers the login entry, and reports whether it is registered so
 # the tray checkbox and the settings UI can show the real state.
 tauri-plugin-autostart = "2"
+# Native .xls / .xlsx / .xlsb / .ods parsing, pure Rust with no C dependency, so the
+# lite build can open a spreadsheet with no LibreOffice at all. Pinned to 0.26 because
+# the module was written against that version's API: later versions changed the merged
+# cell accessors and the Data enum.
+calamine = "0.26"
 
 [dev-dependencies]
 tempfile = "3"

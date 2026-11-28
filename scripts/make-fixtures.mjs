@@ -582,6 +582,136 @@ function buildDocxRich() {
   writeFileSync(join(outDir, 'deck-docx.docx'), Buffer.from(zipSync(files)))
 }
 
+
+/**
+ * A workbook with two sheets, a merged title and a formatted number.
+ *
+ * Built by hand, the way the docx fixture is, because there is no spreadsheet library
+ * available here and adding one would be a dependency for a fixture. It is built the
+ * way a producer writes one rather than the way the reader imagines it: strings go
+ * through sharedStrings with the type attribute set, the dimension is declared, the
+ * merge is in its own mergeCells element, and there are two worksheets so the tab bar
+ * has something to switch between.
+ *
+ * 成绩 / A1:C1 merged title / header row / two students / a blank row / a total row.
+ */
+function buildSheetXlsx() {
+  const sharedStrings = ['期中成绩', '姓名', '语文', '数学', '张三', '李四', '平均分']
+  const stringTable = sharedStrings.map((text) => '<si><t>' + text + '</t></si>').join('')
+
+  const sheet1 = [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    '<dimension ref="A1:C6"/>',
+    '<cols>',
+    // Column A is wider, because names are longer than numbers.
+    '<col min="1" max="1" width="14.5" customWidth="1"/>',
+    '<col min="2" max="3" width="9" customWidth="1"/>',
+    '</cols>',
+    '<sheetData>',
+    '<row r="1"><c r="A1" t="s"><v>0</v></c></row>',
+    '<row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2" t="s"><v>2</v></c><c r="C2" t="s"><v>3</v></c></row>',
+    '<row r="3"><c r="A3" t="s"><v>4</v></c><c r="B3"><v>95</v></c><c r="C3"><v>88.5</v></c></row>',
+    '<row r="4"><c r="A4" t="s"><v>5</v></c><c r="B4"><v>72</v></c><c r="C4"><v>91</v></c></row>',
+    // A row the writer left entirely blank, which must not appear in the window.
+    '<row r="5"/>',
+    '<row r="6"><c r="A6" t="s"><v>6</v></c><c r="B6"><v>83.5</v></c><c r="C6"><v>89.75</v></c></row>',
+    '</sheetData>',
+    // The title spans all three columns, which is the merge the view must draw.
+    '<mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells>',
+    '</worksheet>'
+  ].join('')
+
+  const sheet2 = [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    '<dimension ref="A1:B2"/>',
+    '<sheetData>',
+    '<row r="1"><c r="A1" t="s"><v>1</v></c><c r="B1" t="s"><v>2</v></c></row>',
+    '<row r="2"><c r="A2" t="s"><v>4</v></c><c r="B2"><v>66</v></c></row>',
+    '</sheetData>',
+    '</worksheet>'
+  ].join('')
+
+  const files = {
+    '[Content_Types].xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+        '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+        '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>' +
+        '</Types>'
+    ),
+    '_rels/.rels': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+        '</Relationships>'
+    ),
+    'xl/workbook.xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+        '<sheets>' +
+        '<sheet name="成绩" sheetId="1" r:id="rId1"/>' +
+        '<sheet name="备注" sheetId="2" r:id="rId2"/>' +
+        '</sheets></workbook>'
+    ),
+    'xl/_rels/workbook.xml.rels': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>' +
+        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>' +
+        '</Relationships>'
+    ),
+    'xl/sharedStrings.xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' +
+        sharedStrings.length +
+        '" uniqueCount="' +
+        sharedStrings.length +
+        '">' +
+        stringTable +
+        '</sst>'
+    ),
+    'xl/worksheets/sheet1.xml': strToU8(sheet1),
+    'xl/worksheets/sheet2.xml': strToU8(sheet2)
+  }
+  writeFileSync(join(outDir, 'deck-sheet.xlsx'), Buffer.from(zipSync(files)))
+}
+
+/**
+ * The same table saved the way a Chinese-locale Excel saves a CSV: GBK, not UTF-8.
+ *
+ * The bytes are written literally rather than through a TextEncoder because the point
+ * of the fixture is that the file is NOT valid UTF-8. Reading it as UTF-8 is exactly
+ * the bug the fallback exists to prevent, so a fixture that happened to be valid
+ * UTF-8 would test nothing.
+ */
+function buildSheetCsvGbk() {
+  // 姓名,分数 / 张三,95 / 李四,88.5, in GBK.
+  const bytes = [
+    0xd0, 0xd5, 0xc3, 0xfb, 0x2c, 0xb7, 0xd6, 0xca, 0xfd, 0x0d, 0x0a, 0xd5, 0xc5, 0xc8, 0xfd,
+    0x2c, 0x39, 0x35, 0x0d, 0x0a, 0xc0, 0xee, 0xcb, 0xc4, 0x2c, 0x38, 0x38, 0x2e, 0x35, 0x0d, 0x0a
+  ]
+  writeFileSync(join(outDir, 'deck-sheet-gbk.csv'), Buffer.from(bytes))
+}
+
+/** A UTF-8 CSV with a quoted field, so the parser's quoting path has a real file. */
+function buildSheetCsvUtf8() {
+  const text = [
+    '姓名,评语,分数',
+    '张三,"进步明显, 继续保持",95',
+    '李四,基础扎实,88.5',
+    ''
+  ].join('\r\n')
+  writeFileSync(join(outDir, 'deck-sheet.csv'), Buffer.from(text, 'utf8'))
+}
+
 await build16x9()
 await build4x3()
 await buildSmokePptx()
@@ -592,5 +722,11 @@ buildSmokeOdp()
 buildDocx()
 buildDocxRich()
 buildXlsx()
+buildSheetXlsx()
+buildSheetCsvGbk()
+buildSheetCsvUtf8()
 
-console.log('[make-fixtures] wrote deck-16x9, deck-4x3, smoke, deck-animated, deck-triggers, deck-exit, smoke.odp, smoke.docx, deck-docx.docx, smoke.xlsx')
+console.log(
+  '[make-fixtures] wrote deck-16x9, deck-4x3, smoke, deck-animated, deck-triggers, deck-exit, ' +
+    'smoke.odp, smoke.docx, deck-docx.docx, smoke.xlsx, deck-sheet.xlsx, deck-sheet-gbk.csv, deck-sheet.csv'
+)

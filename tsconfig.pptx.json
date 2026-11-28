@@ -18,6 +18,8 @@
     "tests/unit/pptx-trigger-eval.test.ts",
     "tests/unit/pptx-trigger-fixture.test.ts",
     "tests/unit/pptx-exit.test.ts",
-    "tests/unit/ink-history.test.ts"
+    "tests/unit/ink-history.test.ts",
+    "tests/unit/sheet-window.test.ts",
+    "tests/unit/sheet-grid.test.ts"
   ]
 }

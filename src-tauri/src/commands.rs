@@ -227,6 +227,37 @@ pub fn open_native(
     Some(result)
 }
 
+/// Open a spreadsheet natively: .xls, .xlsx, .xlsb, .ods or a delimited text table.
+///
+/// Separate from open_native because a spreadsheet is not served over pptx://: there is
+/// no part for the renderer to parse, and no page to index. calamine reads the workbook
+/// here and the model crosses IPC once, which is why the call carries a window rather
+/// than a whole sheet.
+///
+/// sheet names the tab to return, and is also how the renderer switches tabs without
+/// reopening the file. first_row and row_count slice a large sheet: a million-row sheet
+/// returned whole would be hundreds of megabytes to draw one screenful.
+#[tauri::command]
+pub async fn open_spreadsheet(
+    path: String,
+    sheet: Option<String>,
+    first_row: Option<u32>,
+    row_count: Option<u32>,
+) -> Result<crate::spreadsheet::SpreadsheetModel, String> {
+    let request = crate::spreadsheet::SheetRequest {
+        sheet,
+        first_row: first_row.unwrap_or(0),
+        row_count: row_count.unwrap_or(0),
+    };
+    // calamine is synchronous and can take a moment on a large workbook, so the work
+    // runs off the async runtime's thread rather than blocking the IPC responder.
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::spreadsheet::open_spreadsheet(std::path::Path::new(&path), &request)
+    })
+    .await
+    .map_err(|err| format!("表格解析失败：{err}"))?
+}
+
 #[tauri::command]
 pub fn cancel_open() {
     // Conversion cancellation is handled inside the pipeline; nothing to do here yet.

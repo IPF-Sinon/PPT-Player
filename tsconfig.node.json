@@ -46,6 +46,8 @@
     "tests/unit/pptx-exit.test.ts",
     "tests/unit/ink-history.test.ts",
     "tests/unit/docx-parse.test.ts",
-    "tests/unit/docx-registry.test.ts"
+    "tests/unit/docx-registry.test.ts",
+    "tests/unit/sheet-window.test.ts",
+    "tests/unit/sheet-grid.test.ts"
   ]
 }
