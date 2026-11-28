@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { zh } from '@shared/strings.zh'
+import { categoryOf } from '@shared/formats'
 import { useAppStore } from '../store'
 import { loadPdf, preloadPdfjs, readFirstPageSize, readPageSizes } from '../lib/pdf'
 import { RenderQueue } from '../lib/render'
 import { loadNativeDeck } from '../lib/pptx/deck'
+import { forgetDocx, prepareDocx } from '../lib/docx/registry'
+import { DocxView } from '../components/DocxView'
 import { ThumbRail } from '../components/ThumbRail'
 import { SlideStage } from '../components/SlideStage'
 import { PptxSlideView } from '../components/PptxSlideView'
@@ -48,7 +51,13 @@ export default function PreviewPage() {
         // Already gone is fine.
       }
     }
-    if (target.deckId) await platform().closeDeck(target.deckId)
+    if (target.deckId) {
+      // A prepared document is keyed by deck id, and the id is derived from the
+      // file's path, size and mtime: closing the deck must drop the parsed copy, or
+      // an edited file would be reopened from a stale parse.
+      forgetDocx(target.deckId)
+      await platform().closeDeck(target.deckId)
+    }
   }, [])
 
   const mountPdf = useCallback(
@@ -130,23 +139,50 @@ export default function PreviewPage() {
         if (token !== openToken.current) return
 
         if (native && native.ok) {
-          const deck = await loadNativeDeck(native.deckId, native.slidePaths, native.slideSize, platform())
-          if (token !== openToken.current) return
-          update(tabId, {
-            engineMode: 'native-pptx',
-            deckId: native.deckId,
-            nativeDeck: deck,
-            pageCount: native.slideCount,
-            pageSizes: [{ width: native.slideSize.width, height: native.slideSize.height }],
-            hasComplexObjects: deck.hasComplexObjects,
-            status: 'ready',
-            progressRatio: 1,
-            convertMs: 0
-          })
-          const ink = await platform().loadInk(native.deckId)
-          update(tabId, { ink })
-          document.title = zh.windowTitle(existing?.title ?? '')
-          return
+          // A Word document has no slides: open_native reports an empty slide list
+          // for one, and the document supplies the page count and the page boxes
+          // once it has been parsed and paginated.
+          if (categoryOf(filePath) === 'docx') {
+            const docx = await prepareDocx(native.deckId, platform())
+            if (token !== openToken.current) return
+            if (docx) {
+              update(tabId, {
+                engineMode: 'native-pptx',
+                deckId: native.deckId,
+                nativeDeck: null,
+                pageCount: docx.pages.length,
+                pageSizes: docx.pageSizes,
+                hasComplexObjects: docx.document.hasComplexObjects,
+                status: 'ready',
+                progressRatio: 1,
+                convertMs: 0
+              })
+              const ink = await platform().loadInk(native.deckId)
+              update(tabId, { ink })
+              document.title = zh.windowTitle(existing?.title ?? '')
+              return
+            }
+            // The archive held no word/document.xml, so there is nothing to draw
+            // natively. Fall through to the engine rather than show a blank stage.
+          } else {
+            const deck = await loadNativeDeck(native.deckId, native.slidePaths, native.slideSize, platform())
+            if (token !== openToken.current) return
+            update(tabId, {
+              engineMode: 'native-pptx',
+              deckId: native.deckId,
+              nativeDeck: deck,
+              pageCount: native.slideCount,
+              pageSizes: [{ width: native.slideSize.width, height: native.slideSize.height }],
+              hasComplexObjects: deck.hasComplexObjects,
+              status: 'ready',
+              progressRatio: 1,
+              convertMs: 0
+            })
+            const ink = await platform().loadInk(native.deckId)
+            update(tabId, { ink })
+            document.title = zh.windowTitle(existing?.title ?? '')
+            return
+          }
         }
 
         // Fall back to conversion for legacy, ODP and encrypted-free decks.
@@ -212,6 +248,25 @@ export default function PreviewPage() {
       if (token !== openToken.current) return
       if (!native || !native.ok) {
         update(tab.tabId, { status: 'error', error: { message: '该文件不支持极速动画模式' } })
+        return
+      }
+      if (categoryOf(tab.filePath) === 'docx') {
+        const docx = await prepareDocx(native.deckId, platform())
+        if (token !== openToken.current) return
+        if (!docx) {
+          update(tab.tabId, { status: 'error', error: { message: '该文件不支持极速模式' } })
+          return
+        }
+        update(tab.tabId, {
+          engineMode: 'native-pptx',
+          deckId: native.deckId,
+          nativeDeck: null,
+          pageCount: docx.pages.length,
+          pageSizes: docx.pageSizes,
+          hasComplexObjects: docx.document.hasComplexObjects,
+          status: 'ready',
+          progressRatio: 1
+        })
         return
       }
       const deck = await loadNativeDeck(native.deckId, native.slidePaths, native.slideSize, platform())
@@ -332,8 +387,16 @@ export default function PreviewPage() {
   const pageCount = tab?.pageCount ?? 0
   const pageIndex = tab?.currentPage ?? 0
   const isNative = tab?.engineMode === 'native-pptx'
-  const nativeDeck = tab?.nativeDeck ?? null
-  const currentSlide = isNative ? nativeDeck?.slides[pageIndex] ?? null : null
+  /**
+   * A Word document rendered natively.
+   *
+   * It shares the native engine mode with a deck because it goes through the same
+   * container and the same part scheme, but it has no slides and no slide stage, so
+   * every branch that assumes a deck has to know the difference.
+   */
+  const isDocx = isNative && categoryOf(tab?.filePath ?? '') === 'docx'
+  const nativeDeck = isNative && !isDocx ? tab?.nativeDeck ?? null : null
+  const currentSlide = nativeDeck?.slides[pageIndex] ?? null
 
   /**
    * Parse the slide the stage is showing.
@@ -375,7 +438,16 @@ export default function PreviewPage() {
 
         <div className="stage-wrap">
           {tab && tab.status === 'ready' ? (
-            isNative && currentSlide ? (
+            isNative && isDocx ? (
+              // A Word document has no slides: the stage draws the page the pager is
+              // on, fitted to the window, exactly as the reading column draws it.
+              <DocxView
+                deckId={tab.deckId}
+                pageIndex={pageIndex}
+                fit
+                onDoubleClick={() => void startShow()}
+              />
+            ) : isNative && currentSlide ? (
               <PptxSlideView
                 slide={currentSlide}
                 step={0}
@@ -496,11 +568,11 @@ export default function PreviewPage() {
         {tab && tab.status === 'ready' ? (
           <div className="bottombar-group">
             <span className="badge" data-testid="deck-format">
-              {isNative ? 'PPTX' : tab.engineMode === 'pdf' ? 'PDF' : '已转换'}
+              {isDocx ? 'DOCX' : isNative ? 'PPTX' : tab.engineMode === 'pdf' ? 'PDF' : '已转换'}
             </span>
             {isNative ? (
               <span className="badge badge-soft" data-testid="engine-badge">
-                极速动画
+                {isDocx ? '原生渲染' : '极速动画'}
               </span>
             ) : null}
             {tab.hasComplexObjects ? (

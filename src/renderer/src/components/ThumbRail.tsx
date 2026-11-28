@@ -4,6 +4,8 @@ import { renderPageToCanvas, type RenderQueue } from '../lib/render'
 import type { TabItem } from '../lib/tabs'
 import type { SlideModel } from '../lib/pptx/types'
 import { PptxSlideView } from './PptxSlideView'
+import { DocxView } from './DocxView'
+import { useDocx } from '../lib/docx/use-docx'
 
 interface ThumbProps {
   doc: PdfDocumentProxyLike
@@ -141,6 +143,47 @@ function NativeThumb({ deckId, slide, pageNumber, active, onSelect }: NativeThum
   )
 }
 
+interface DocxThumbProps {
+  deckId: string
+  pageIndex: number
+  pageNumber: number
+  active: boolean
+  onSelect: (pageIndex: number) => void
+}
+
+/**
+ * Thumbnail for one page of a Word document.
+ *
+ * The page is drawn at its own logical size and scaled by CSS, the same way a
+ * native slide thumbnail is: the DOM tree is small and the browser scales it on the
+ * compositor, which is far cheaper than rasterising every page of a long document.
+ */
+function DocxThumb({ deckId, pageIndex, pageNumber, active, onSelect }: DocxThumbProps) {
+  const prepared = useDocx(deckId, true)
+  const paper = prepared?.pageSizes[pageIndex]
+  // The scale comes from the page's own width: a document authored on A4 and one
+  // authored on Letter must both fill the same thumbnail width.
+  const scale = paper && paper.width > 0 ? THUMB_WIDTH / paper.width : 1
+  const height = paper ? paper.height * scale : 112
+
+  return (
+    <button
+      type="button"
+      className="rail-item"
+      data-active={active}
+      data-testid={'thumb-' + pageNumber}
+      onClick={() => onSelect(pageIndex)}
+      aria-label={'第 ' + pageNumber + ' 页'}
+      aria-current={active ? 'true' : undefined}
+    >
+      <span className="rail-index">{pageNumber}</span>
+      <div className="rail-native" style={{ width: THUMB_WIDTH, height }}>
+        <DocxView deckId={deckId} pageIndex={pageIndex} fixedScale={scale} />
+      </div>
+    </button>
+  )
+}
+
 interface ThumbRailProps {
   tab: TabItem | null
   queue: RenderQueue
@@ -188,6 +231,24 @@ export function ThumbRail({ tab, queue, onSelect }: ThumbRailProps) {
             key={tab.tabId + '-' + i}
             deckId={tab.deckId}
             slide={deck.slides[i] ?? null}
+            pageNumber={i + 1}
+            active={i === tab.currentPage}
+            onSelect={onSelect}
+          />
+        ))}
+      </aside>
+    )
+  }
+
+  // A Word document has no slides, so its rail shows document pages.
+  if (isNative) {
+    return (
+      <aside className="rail" data-testid="thumb-rail">
+        {Array.from({ length: tab.pageCount }, (_, i) => (
+          <DocxThumb
+            key={tab.tabId + '-' + i}
+            deckId={tab.deckId}
+            pageIndex={i}
             pageNumber={i + 1}
             active={i === tab.currentPage}
             onSelect={onSelect}

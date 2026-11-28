@@ -1,4 +1,4 @@
-import type { DeckKind } from './types'
+import type { DeckKind, DocumentCategory } from './types'
 
 /** Declared extensions the app is willing to open. */
 export const SUPPORTED_EXTENSIONS = [
@@ -50,4 +50,23 @@ export function extensionOf(filePath: string): string {
 
 export function isSupportedExtension(ext: string): ext is SupportedExtension {
   return (SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)
+}
+
+/**
+ * Which reading behaviour a file gets.
+ *
+ * The extension is enough: the tab has already been opened by the time a view runs,
+ * so the format was accepted, and the four categories are the four ways a file is
+ * meant to be read rather than four ways of decoding it.
+ *
+ * It lives here rather than in one page because both the preview stage and the
+ * playback column need it, and two copies of this mapping would eventually classify
+ * a .docm two different ways in two places.
+ */
+export function categoryOf(filePath: string): DocumentCategory {
+  const ext = extensionOf(filePath)
+  if (ext === 'pdf') return 'pdf'
+  if (ext === 'doc' || ext === 'docx' || ext === 'docm' || ext === 'dot' || ext === 'dotx') return 'docx'
+  if (ext === 'xls' || ext === 'xlsx' || ext === 'xlsm' || ext === 'xlt' || ext === 'xltx') return 'xls'
+  return 'ppt'
 }

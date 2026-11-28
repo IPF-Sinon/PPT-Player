@@ -12,6 +12,28 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::types::*;
 use crate::{convert, engine_download, engine_resolve, index_parse, ink, paths, settings, zip_vfs};
 
+/// The part that makes an archive a Word document rather than a deck.
+const WORD_MAIN_PART: &str = "word/document.xml";
+/// The macro project a .docm carries and a .docx does not.
+const WORD_MACRO_PART: &str = "word/vbaProject.bin";
+
+/// Whether an open archive is a Word document.
+///
+/// The archive's contents decide, not the file name: a presentation and a document
+/// are both ZIPs, and a file renamed between the two extensions must still open.
+fn is_word_document(vfs: &zip_vfs::ZipVfs) -> bool {
+    vfs.has(WORD_MAIN_PART)
+}
+
+/// A4 at 96 DPI, which is Word's default page and what a caller that has not read
+/// word/document.xml yet should assume.
+fn a4_size() -> PageSize {
+    PageSize {
+        width: 794.0,
+        height: 1123.0,
+    }
+}
+
 /// Process-wide state.
 pub struct AppState {
     /// A deck path passed on the command line, consumed once at startup.
@@ -130,6 +152,15 @@ pub async fn open(app: AppHandle, path: String) -> OpenResult {
     }
 }
 
+/// Open an OOXML file natively: a presentation, or a Word document.
+///
+/// Both are ZIP containers served through the same pptx:// scheme, so a .docx
+/// needs no second protocol and no conversion. What differs is only what the
+/// renderer does with the parts: a deck indexes its slides, a document reads
+/// word/document.xml and paginates it itself.
+///
+/// A legacy binary .doc is a CFB, not a ZIP, so detect() never reports it as
+/// OoxmlDocument and this returns None: it still goes through the engine.
 #[tauri::command]
 pub fn open_native(
     app: AppHandle,
@@ -138,11 +169,27 @@ pub fn open_native(
 ) -> Option<NativeOpenResult> {
     let p = std::path::Path::new(&path);
     let format = crate::detect::detect(p);
-    if format.kind != DeckKind::OoxmlPresentation {
+    if format.kind != DeckKind::OoxmlPresentation && format.kind != DeckKind::OoxmlDocument {
         return None;
     }
     let vfs = zip_vfs::ZipVfs::open(p).ok()?;
-    let index = index_parse::build_presentation_index(&vfs)?;
+
+    // Which main part the archive holds decides how it is read, not the extension:
+    // a ZIP named .docx that carries ppt/presentation.xml is a presentation, and
+    // treating it as a document would render nothing at all.
+    let (slide_paths, slide_size, has_macros) = if is_word_document(&vfs) {
+        // A Word document has no slides. Its page size lives in word/document.xml,
+        // which the renderer reads itself, so the value here is only a placeholder
+        // for a caller that has not looked yet: A4 at 96 DPI.
+        (Vec::new(), a4_size(), vfs.has(WORD_MACRO_PART))
+    } else {
+        let index = index_parse::build_presentation_index(&vfs)?;
+        (
+            index.slides.iter().map(|s| s.path.clone()).collect(),
+            index.slide_size,
+            index.has_macros,
+        )
+    };
 
     // The id keys the annotation file, so it has to be the same for the same file
     // across sessions. A random id meant annotations were written under one name and
@@ -163,9 +210,9 @@ pub fn open_native(
 
     let result = NativeOpenResult {
         deck_id: deck_id.clone(),
-        slide_paths: index.slides.iter().map(|s| s.path.clone()).collect(),
-        slide_size: index.slide_size.clone(),
-        has_macros: index.has_macros,
+        slide_paths,
+        slide_size,
+        has_macros,
     };
 
     if let Ok(mut decks) = state.native_decks.lock() {
@@ -532,6 +579,49 @@ pub fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     }
 }
 
+
+#[cfg(test)]
+mod native_open_tests {
+    use super::*;
+    use crate::zip_vfs::test_zip::{build, Fixture};
+
+    fn open(entries: &[Fixture]) -> (tempfile::TempDir, zip_vfs::ZipVfs) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file");
+        std::fs::write(&path, build(entries)).unwrap();
+        (dir, zip_vfs::ZipVfs::open(&path).unwrap())
+    }
+
+    #[test]
+    fn an_archive_with_word_document_xml_is_a_document() {
+        let (_d, vfs) = open(&[Fixture::stored("word/document.xml", b"<w:document/>")]);
+        assert!(is_word_document(&vfs));
+    }
+
+    #[test]
+    fn a_presentation_archive_is_not_a_document() {
+        let (_d, vfs) = open(&[Fixture::stored("ppt/presentation.xml", b"<p:presentation/>")]);
+        assert!(!is_word_document(&vfs));
+    }
+
+    #[test]
+    fn the_decision_follows_the_contents_not_the_extension() {
+        // Both formats are ZIPs and a file can be renamed; what it holds decides.
+        let (_d, vfs) = open(&[
+            Fixture::stored("word/document.xml", b"<w:document/>"),
+            Fixture::stored("ppt/presentation.xml", b"<p:presentation/>"),
+        ]);
+        assert!(is_word_document(&vfs));
+    }
+
+    #[test]
+    fn a_document_is_reported_at_a4_until_the_renderer_reads_its_page_size() {
+        let size = a4_size();
+        // A4 is 210x297mm, which is 794x1123 px at 96 DPI.
+        assert!((size.width - 794.0).abs() < 1.0);
+        assert!((size.height - 1123.0).abs() < 1.0);
+    }
+}
 
 #[cfg(test)]
 mod engine_source_tests {

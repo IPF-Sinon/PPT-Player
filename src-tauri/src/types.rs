@@ -13,7 +13,8 @@ pub enum DeckKind {
     Odp,
     LegacyPpt,
     EncryptedOoxml,
-    /// Word documents, converted through Writer.
+    /// Word documents. A .docx is rendered natively through the same pptx:// part
+    /// scheme a deck uses; only the legacy binary .doc needs the engine.
     OoxmlDocument,
     LegacyDoc,
     /// Spreadsheets, converted through Calc.

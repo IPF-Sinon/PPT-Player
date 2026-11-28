@@ -751,3 +751,126 @@
   left: auto;
   transform: none;
 }
+
+/* ---------------------------------------------------------------- Word documents */
+/* A .docx is drawn as real HTML at its authored page size and scaled, the same way
+   a native slide is: text stays sharp at any zoom and can be selected, which a
+   bitmap of the page could not offer. */
+.docx-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #1b1f26;
+}
+
+.docx-scale {
+  flex: 0 0 auto;
+  box-shadow: 0 6px 32px rgba(0, 0, 0, 0.45);
+}
+
+.docx-loading {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+}
+
+/* The sheet of paper. Margins are applied as padding, so the content box is exactly
+   the authored text area at every scale. */
+.docx-page {
+  position: relative;
+  box-sizing: border-box;
+  background: #fff;
+  color: #1a1a1a;
+  overflow: hidden;
+}
+
+.docx-page-body {
+  box-sizing: border-box;
+  /* A page is a document, not a slide: the browser's own text defaults would make
+     an unstyled paragraph render at 16px with different leading than Word's. */
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Source Han Sans SC',
+    'Noto Sans CJK SC', 'Times New Roman', serif;
+  font-size: 14.6667px;
+  line-height: 1.5;
+  /* A long unbroken string (a URL in a teaching handout) must wrap rather than
+     escape the page. */
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.docx-blocks {
+  display: block;
+}
+
+.docx-p {
+  margin: 0;
+  white-space: pre-wrap;
+  position: relative;
+}
+
+/* Word's tab stop is a real tab; a browser would collapse it to a single space. */
+.docx-p-text {
+  tab-size: 4;
+}
+
+.docx-marker {
+  position: absolute;
+  display: inline-block;
+  text-align: right;
+  /* The marker sits in its own column and never wraps into the text. */
+  white-space: nowrap;
+  padding-right: 0.4em;
+  box-sizing: border-box;
+}
+
+.docx-image {
+  display: inline-block;
+  max-width: 100%;
+  object-fit: contain;
+  vertical-align: baseline;
+}
+
+.docx-table-wrap {
+  display: block;
+  margin: 6px 0;
+  overflow: hidden;
+}
+
+.docx-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  max-width: 100%;
+}
+
+.docx-table td {
+  padding: 3px 6px;
+  vertical-align: top;
+}
+
+/* A cell's paragraphs must not carry the outer margins body paragraphs have, or
+   every cell would be padded by its neighbour's spacing. */
+.docx-blocks[data-in-cell='true'] .docx-p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* The hidden host the blocks are measured in. It has to be laid out at the real
+   content width, so it cannot be display:none; it is moved out of sight instead. */
+.docx-measure {
+  position: absolute;
+  left: -100000px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  contain: layout style;
+}
+
+/* One page inside the reading column. The column sizes the slot; the page fills it
+   at whatever scale that slot implies. */
+.docx-column-page {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}

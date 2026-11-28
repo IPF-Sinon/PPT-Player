@@ -2,13 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import type {
   CategoryBinding,
-  DocumentCategory,
   InkPage,
   InkStroke,
   ToolbarStyle,
   ViewMode
 } from '@shared/types'
-import { extensionOf } from '@shared/formats'
+import { categoryOf } from '@shared/formats'
 import { zh } from '@shared/strings.zh'
 import { useAppStore } from '../store'
 import { RenderQueue, renderPageToCanvas } from '../lib/render'
@@ -28,6 +27,7 @@ import { BoardPager } from '../components/BoardPager'
 import { InkLayer } from '../components/InkLayer'
 import { Whiteboard } from '../components/Whiteboard'
 import { PptxTransition } from '../components/PptxTransition'
+import { DocxView, DocxColumnPage } from '../components/DocxView'
 import {
   NativePageCanvas,
   PageCanvas,
@@ -47,21 +47,6 @@ const FAB_POSITION_KEY = 'ppt-player.fab-position'
 
 /** Reading a show opens with, before the saved binding is known. */
 const FALLBACK_BINDING: CategoryBinding = { viewMode: 'slide', toolbarStyle: 'bar' }
-
-/**
- * Which reading behaviour a file gets.
- *
- * The extension is enough: the tab has already been opened by the time playback
- * runs, so the format was accepted, and the four categories are the four ways a file
- * is meant to be read rather than four ways of decoding it.
- */
-function categoryOf(filePath: string): DocumentCategory {
-  const ext = extensionOf(filePath)
-  if (ext === 'pdf') return 'pdf'
-  if (ext === 'doc' || ext === 'docx' || ext === 'docm') return 'docx'
-  if (ext === 'xls' || ext === 'xlsx' || ext === 'xlsm') return 'xls'
-  return 'ppt'
-}
 
 function readFabPosition(): FabPosition | null {
   try {
@@ -139,6 +124,14 @@ export default function PlaybackPage() {
   const columnRef = useRef<SingleColumnController | null>(null)
 
   const isNative = tab?.engineMode === 'native-pptx'
+  /**
+   * A Word document rendered natively.
+   *
+   * It shares the native engine mode with a deck because it travels through the
+   * same container and the same part scheme, but it has no slides: its pages are
+   * drawn by DocxView rather than by the slide stage.
+   */
+  const isDocx = isNative && categoryOf(tab?.filePath ?? '') === 'docx'
   const pageIndex = tab?.currentPage ?? 0
   const step = tab?.currentStep ?? 0
   const pageCount = tab?.pageCount ?? 0
@@ -163,7 +156,7 @@ export default function PlaybackPage() {
 
   /** Load the slide the presenter is on, parsing it if this is the first visit. */
   useEffect(() => {
-    if (!isNative || !tab?.nativeDeck) {
+    if (!isNative || isDocx || !tab?.nativeDeck) {
       setSlide(null)
       return
     }
@@ -179,7 +172,7 @@ export default function PlaybackPage() {
     return () => {
       cancelled = true
     }
-  }, [isNative, tab?.nativeDeck, pageIndex])
+  }, [isNative, isDocx, tab?.nativeDeck, pageIndex])
 
   const totalSteps = slide?.steps.length ?? 0
 
@@ -608,6 +601,11 @@ export default function PlaybackPage() {
   /** Pages of the column view, drawn by the same PDF renderer the stage uses. */
   const renderColumnPage = useCallback(
     (index: number, box: PageBox): ReactNode => {
+      if (isDocx) {
+        return tab?.deckId ? (
+          <DocxColumnPage deckId={tab.deckId} pageIndex={index} box={box} />
+        ) : null
+      }
       if (isNative) {
         return tab?.nativeDeck ? <NativePageCanvas deck={tab.nativeDeck} pageIndex={index} /> : null
       }
@@ -623,7 +621,7 @@ export default function PlaybackPage() {
         />
       )
     },
-    [isNative, tab?.nativeDeck, doc, queue]
+    [isNative, isDocx, tab?.nativeDeck, tab?.deckId, doc, queue]
   )
 
   const strokesOfPage = useCallback(
@@ -719,10 +717,14 @@ export default function PlaybackPage() {
             ref={frameRef}
             data-testid="slide-frame"
             data-engine={isNative ? 'native-pptx' : 'pdf'}
-            data-painted={isNative ? slide !== null : painted}
+            data-painted={isDocx ? true : isNative ? slide !== null : painted}
             style={{ ['--slide-ratio' as string]: String(ratio) }}
           >
-            {isNative && slide ? (
+            {isDocx ? (
+              // A document in slide mode draws one page at a time, which is what the
+              // presenter asked for by switching to it.
+              <DocxView deckId={tab.deckId} pageIndex={pageIndex} fit />
+            ) : isNative && slide ? (
               <PptxTransition
                 slide={slide}
                 step={step}
