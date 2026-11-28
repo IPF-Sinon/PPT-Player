@@ -193,7 +193,16 @@ pub fn report_metrics(
 #[tauri::command]
 pub fn pick_file() -> Option<String> {
     let picked = rfd::FileDialog::new()
-        .add_filter("演示文稿", &["pptx", "pptm", "ppsx", "ppt", "odp", "pdf"])
+        .add_filter(
+            "教学文档",
+            &[
+                "pptx", "pptm", "ppsx", "pps", "ppt", "odp", "pdf", "docx", "doc", "xlsx", "xls",
+            ],
+        )
+        .add_filter("演示文稿", &["pptx", "pptm", "ppsx", "ppt", "odp"])
+        .add_filter("文档", &["docx", "doc"])
+        .add_filter("表格", &["xlsx", "xls"])
+        .add_filter("PDF", &["pdf"])
         .pick_file()?;
     Some(picked.to_string_lossy().to_string())
 }

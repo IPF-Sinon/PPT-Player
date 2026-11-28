@@ -44,7 +44,11 @@ fn label_for(kind: DeckKind) -> &'static str {
         DeckKind::OoxmlPresentation => "PPTX",
         DeckKind::Odp => "ODP",
         DeckKind::LegacyPpt => "PPT",
-        DeckKind::EncryptedOoxml => "PPTX（已加密）",
+        DeckKind::OoxmlDocument => "DOCX",
+        DeckKind::LegacyDoc => "DOC",
+        DeckKind::OoxmlSheet => "XLSX",
+        DeckKind::LegacySheet => "XLS",
+        DeckKind::EncryptedOoxml => "已加密",
         DeckKind::Pdf => "PDF",
         DeckKind::Unsupported => "不支持",
     }
@@ -80,21 +84,26 @@ pub fn detect(path: &Path) -> FormatInfo {
         ContainerKind::Pdf => (DeckKind::Pdf, false, None),
         ContainerKind::Zip => match ext.as_str() {
             "odp" => (DeckKind::Odp, false, None),
-            "pptx" | "pptm" | "ppsx" | "ppsm" | "potx" => (DeckKind::OoxmlPresentation, false, None),
-            // A ZIP that is not declared as a presentation is still worth trying as
-            // OOXML: the extension may simply be wrong.
+            "docx" | "docm" | "dotx" => (DeckKind::OoxmlDocument, false, None),
+            "xlsx" | "xlsm" | "xltx" => (DeckKind::OoxmlSheet, false, None),
+            "pptx" | "pptm" | "ppsx" | "ppsm" | "potx" => {
+                (DeckKind::OoxmlPresentation, false, None)
+            }
+            // An unknown extension on a ZIP is still worth trying as OOXML, and the
+            // presentation form is what this app exists for.
             _ => (DeckKind::OoxmlPresentation, false, None),
         },
         ContainerKind::Cfb => {
-            // A password-protected OOXML file is a CFB with EncryptionInfo, and a
-            // legacy .ppt is a CFB with PowerPoint Document. They are told apart when
-            // the file is opened; here the extension is the better guess.
-            if ext == "pptx" || ext == "pptm" || ext == "ppsx" {
-                (DeckKind::EncryptedOoxml, true, None)
-            } else if ext == "ppt" || ext == "pps" || ext == "pot" {
-                (DeckKind::LegacyPpt, false, None)
-            } else {
-                (DeckKind::LegacyPpt, false, None)
+            // A password-protected OOXML file is a CFB holding EncryptionInfo, and a
+            // legacy binary document is a CFB holding its own stream. The container
+            // alone cannot tell them apart, so the extension decides here.
+            match ext.as_str() {
+                "pptx" | "pptm" | "ppsx" | "docx" | "docm" | "xlsx" | "xlsm" => {
+                    (DeckKind::EncryptedOoxml, true, None)
+                }
+                "doc" | "dot" => (DeckKind::LegacyDoc, false, None),
+                "xls" | "xlt" | "xla" => (DeckKind::LegacySheet, false, None),
+                _ => (DeckKind::LegacyPpt, false, None),
             }
         }
         ContainerKind::Unknown => (
@@ -108,7 +117,13 @@ pub fn detect(path: &Path) -> FormatInfo {
         DeckKind::OoxmlPresentation => &["pptx", "pptm", "ppsx", "ppsm", "potx"],
         DeckKind::Odp => &["odp"],
         DeckKind::LegacyPpt => &["ppt", "pps", "pot"],
-        DeckKind::EncryptedOoxml => &["pptx", "pptm", "ppsx"],
+        DeckKind::OoxmlDocument => &["docx", "docm", "dotx"],
+        DeckKind::LegacyDoc => &["doc", "dot"],
+        DeckKind::OoxmlSheet => &["xlsx", "xlsm", "xltx"],
+        DeckKind::LegacySheet => &["xls", "xlt", "xla"],
+        DeckKind::EncryptedOoxml => &[
+            "pptx", "pptm", "ppsx", "docx", "docm", "xlsx", "xlsm",
+        ],
         DeckKind::Pdf => &["pdf"],
         DeckKind::Unsupported => &[],
     };
@@ -198,5 +213,31 @@ mod tests {
     fn missing_file_is_unsupported_not_a_panic() {
         let info = detect(Path::new("/definitely/not/here.pptx"));
         assert_eq!(info.kind, DeckKind::Unsupported);
+    }
+
+    #[test]
+    fn recognises_word_and_spreadsheet_containers() {
+        let zip = b"PK\x03\x04rest";
+        let (_d1, docx) = write("a.docx", zip);
+        assert_eq!(detect(&docx).kind, DeckKind::OoxmlDocument);
+        let (_d2, xlsx) = write("a.xlsx", zip);
+        assert_eq!(detect(&xlsx).kind, DeckKind::OoxmlSheet);
+
+        // Legacy forms are CFB containers distinguished only by extension.
+        let cfb = &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0];
+        let (_d3, doc) = write("a.doc", cfb);
+        assert_eq!(detect(&doc).kind, DeckKind::LegacyDoc);
+        let (_d4, xls) = write("a.xls", cfb);
+        assert_eq!(detect(&xls).kind, DeckKind::LegacySheet);
+    }
+
+    #[test]
+    fn a_locked_spreadsheet_is_encrypted_not_legacy() {
+        // An encrypted OOXML file is a CFB; only the extension says it is Excel.
+        let cfb = &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0];
+        let (_d, path) = write("locked.xlsx", cfb);
+        let info = detect(&path);
+        assert_eq!(info.kind, DeckKind::EncryptedOoxml);
+        assert!(info.encrypted);
     }
 }

@@ -5,6 +5,10 @@ export type DeckKind =
   | 'odp'
   | 'legacy-ppt'
   | 'encrypted-ooxml'
+  | 'ooxml-document'
+  | 'legacy-doc'
+  | 'ooxml-sheet'
+  | 'legacy-sheet'
   | 'pdf'
   | 'unsupported'
 

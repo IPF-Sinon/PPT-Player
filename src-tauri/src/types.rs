@@ -13,6 +13,12 @@ pub enum DeckKind {
     Odp,
     LegacyPpt,
     EncryptedOoxml,
+    /// Word documents, converted through Writer.
+    OoxmlDocument,
+    LegacyDoc,
+    /// Spreadsheets, converted through Calc.
+    OoxmlSheet,
+    LegacySheet,
     Pdf,
     Unsupported,
 }

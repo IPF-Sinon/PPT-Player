@@ -10,7 +10,13 @@ export const SUPPORTED_EXTENSIONS = [
   'ppsm',
   'potx',
   'odp',
-  'pdf'
+  'pdf',
+  'docx',
+  'docm',
+  'doc',
+  'xlsx',
+  'xlsm',
+  'xls'
 ] as const
 
 export type SupportedExtension = (typeof SUPPORTED_EXTENSIONS)[number]
@@ -20,7 +26,11 @@ export const KIND_LABEL: Record<DeckKind, string> = {
   'ooxml-presentation': 'PPTX',
   odp: 'ODP',
   'legacy-ppt': 'PPT',
-  'encrypted-ooxml': 'PPTX (加密)',
+  'ooxml-document': 'DOCX',
+  'legacy-doc': 'DOC',
+  'ooxml-sheet': 'XLSX',
+  'legacy-sheet': 'XLS',
+  'encrypted-ooxml': '已加密',
   pdf: 'PDF',
   unsupported: '不支持'
 }

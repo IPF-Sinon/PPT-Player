@@ -79,6 +79,48 @@
       },
       {
         "ext": [
+          "docx",
+          "docm",
+          "dotx"
+        ],
+        "name": "Word 文档",
+        "description": "Word 文档",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "doc",
+          "dot"
+        ],
+        "name": "Word 97-2003 文档",
+        "description": "旧版 Word 文档",
+        "mimeType": "application/msword",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "xlsx",
+          "xlsm",
+          "xltx"
+        ],
+        "name": "Excel 工作簿",
+        "description": "Excel 工作簿",
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "xls",
+          "xlt"
+        ],
+        "name": "Excel 97-2003 工作簿",
+        "description": "旧版 Excel 工作簿",
+        "mimeType": "application/vnd.ms-excel",
+        "role": "Editor"
+      },
+      {
+        "ext": [
           "pdf"
         ],
         "name": "PDF 文档",

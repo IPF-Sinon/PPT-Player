@@ -270,7 +270,28 @@ fn run_conversion(
     }
 }
 
-/// Arguments for a headless Impress-to-PDF conversion.
+/// The PDF export filter for a source file.
+///
+/// LibreOffice picks a filter by the document it loaded, but naming it explicitly is
+/// what keeps a spreadsheet from being handed to the presentation filter. Each
+/// application has its own PDF exporter.
+pub fn filter_for(source: &Path) -> &'static str {
+    let ext = source
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "doc" | "docx" | "docm" | "dot" | "dotx" | "odt" | "rtf" | "txt" => {
+            "pdf:writer_pdf_Export"
+        }
+        "xls" | "xlsx" | "xlsm" | "xlt" | "xltx" | "xla" | "ods" | "csv" => {
+            "pdf:calc_pdf_Export"
+        }
+        _ => "pdf:impress_pdf_Export",
+    }
+}
+
+/// Arguments for a headless conversion to PDF.
 fn build_args(profile_dir: &Path, out_dir: &Path, source: &Path) -> Vec<OsString> {
     let profile_url = to_file_url(profile_dir);
     vec![
@@ -283,7 +304,7 @@ fn build_args(profile_dir: &Path, out_dir: &Path, source: &Path) -> Vec<OsString
         OsString::from("--nolockcheck"),
         OsString::from(format!("-env:UserInstallation={profile_url}")),
         OsString::from("--convert-to"),
-        OsString::from("pdf:impress_pdf_Export"),
+        OsString::from(filter_for(source)),
         OsString::from("--outdir"),
         out_dir.as_os_str().to_os_string(),
         source.as_os_str().to_os_string(),
@@ -483,6 +504,18 @@ fn kill_orphans_on_windows(profile: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_document_kind_gets_its_own_export_filter() {
+        // Handing a spreadsheet to the presentation filter converts nothing, and the
+        // failure looks like a hang rather than an error.
+        assert_eq!(filter_for(Path::new("a.pptx")), "pdf:impress_pdf_Export");
+        assert_eq!(filter_for(Path::new("a.odp")), "pdf:impress_pdf_Export");
+        assert_eq!(filter_for(Path::new("a.docx")), "pdf:writer_pdf_Export");
+        assert_eq!(filter_for(Path::new("a.DOC")), "pdf:writer_pdf_Export");
+        assert_eq!(filter_for(Path::new("a.xlsx")), "pdf:calc_pdf_Export");
+        assert_eq!(filter_for(Path::new("a.XLS")), "pdf:calc_pdf_Export");
+    }
 
     #[test]
     fn a_windows_path_becomes_a_file_url() {
