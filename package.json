@@ -2,7 +2,6 @@
   "name": "ppt-player",
   "version": "0.4.2",
   "description": "Windows desktop player for PowerPoint / OpenDocument presentations",
-  "main": "./out/main/index.js",
   "author": "PolarNight",
   "license": "MIT",
   "private": true,
@@ -11,8 +10,8 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "node scripts/copy-pdfjs-assets.mjs && electron-vite build",
+    "dev": "vite",
+    "build": "node scripts/copy-pdfjs-assets.mjs && vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck:pptx": "tsc --noEmit -p tsconfig.pptx.json",
@@ -21,10 +20,13 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test",
-    "package": "npm run build && node scripts/set-variant.mjs full && electron-builder --config electron-builder.yml --win nsis zip --x64 --publish never",
-    "package:full": "npm run build && node scripts/set-variant.mjs full && electron-builder --config electron-builder.yml --win nsis zip --x64 --publish never",
-    "package:lite": "npm run build && node scripts/set-variant.mjs lite && electron-builder --config electron-builder.lite.yml --win nsis zip --x64 --publish never",
+    "package": "npm run package:lite",
+    "package:full": "npm run build && npx --yes @tauri-apps/cli@2 build --config src-tauri/tauri.full.conf.json --bundles nsis,zip",
+    "package:lite": "npm run build && npx --yes @tauri-apps/cli@2 build --config src-tauri/tauri.conf.json --bundles nsis,zip",
     "fixtures": "node scripts/make-fixtures.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.5"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
@@ -35,9 +37,6 @@
     "@vitejs/plugin-react": "6.3.0",
     "@vitest/coverage-v8": "5.1.1",
     "cfb": "1.2.2",
-    "electron": "45.3.4",
-    "electron-builder": "26.18.0",
-    "electron-vite": "6.0.0",
     "eslint": "9.39.5",
     "fflate": "0.8.3",
     "jsdom": "^31.0.1",

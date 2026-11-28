@@ -2,10 +2,14 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self' app:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' app: data: blob:; font-src 'self' app: data:; worker-src 'self' blob:; connect-src 'self' app: blob: data:; object-src 'none'; base-uri 'none'; form-action 'none';"
-    />
+    <!--
+      No Content-Security-Policy here on purpose. The Tauri shell owns it: the policy
+      lives in src-tauri/tauri.conf.json (app.security.csp), and Tauri injects it as a
+      meta tag at build time together with the script/style hashes and nonces it
+      computes for the bundled assets. A second policy in this file would intersect
+      with that one, and the stale `app:`/no-`ipc:` sources it used under Electron
+      would block invoke() and the deck:// and pptx:// asset origins.
+    -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PPT 放映器</title>
   </head>
