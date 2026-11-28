@@ -394,6 +394,13 @@ jobs:
       - name: Build lite
         shell: pwsh
         run: |
+          # A cached bundle directory can still hold the previous full installer, and
+          # the packaging step takes the first exe it finds. Clearing it means the lite
+          # installer can only be the one this build produced.
+          if (Test-Path 'src-tauri/target/release/bundle/nsis') {
+            Remove-Item -Recurse -Force 'src-tauri/target/release/bundle/nsis'
+            Write-Host 'cleared the previous bundle output'
+          }
           tauri build --config src-tauri/tauri.conf.json --bundles nsis 2>&1 | Tee-Object -FilePath tauri-lite.log
           if ($LASTEXITCODE -ne 0) {
             Get-Content tauri-lite.log -Tail 80
