@@ -33,7 +33,9 @@
     "icon": [
       "icons/icon.ico"
     ],
-    "resources": [],
+    "resources": [
+      "../resources/engine.json"
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser",

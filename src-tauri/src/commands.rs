@@ -341,23 +341,82 @@ pub fn pick_lo_path() -> Option<String> {
     Some(picked.to_string_lossy().to_string())
 }
 
-#[tauri::command]
-pub async fn engine_download(app: AppHandle) -> Result<String, String> {
-    let url = option_env!("PPT_ENGINE_URL").unwrap_or_default();
-    let sha = option_env!("PPT_ENGINE_SHA256").unwrap_or_default();
-    let bytes: u64 = option_env!("PPT_ENGINE_BYTES")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+/// The engine package this build can download.
+pub struct EngineSource {
+    pub url: String,
+    pub sha256: String,
+    pub bytes: u64,
+}
+
+/// Locate the engine manifest, preferring the copy shipped beside the binary.
+///
+/// The download details used to be compile-time environment variables, and no build ever
+/// set them, so every release told the user there was no download address while one was
+/// in fact published. Reading the manifest at runtime is what makes the answer depend on
+/// the artifact rather than on how it happened to be compiled.
+pub fn engine_manifest(app: &AppHandle) -> Option<serde_json::Value> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(dir) = app.path().resource_dir() {
+        candidates.push(dir.join("resources").join("engine.json"));
+        candidates.push(dir.join("engine.json"));
+    }
+    // A development run has no resource directory; the manifest sits above the crate.
+    candidates.push(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../resources/engine.json"),
+    );
+    for path in candidates {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+/// Read a download source out of a manifest value.
+///
+/// Split from the file lookup so the parsing rules can be tested without an app handle.
+pub fn engine_source_from(manifest: &serde_json::Value) -> Result<EngineSource, String> {
+    let field = |name: &str| -> String {
+        manifest
+            .get(name)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let url = field("engineZipUrl");
     if url.is_empty() {
         return Err("此版本不包含引擎下载地址".into());
     }
+    Ok(EngineSource {
+        url,
+        sha256: field("engineZipSha256"),
+        bytes: manifest
+            .get("engineZipBytes")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+    })
+}
+
+/// The download source for the engine, or the reason there is none.
+pub fn engine_source(app: &AppHandle) -> Result<EngineSource, String> {
+    let manifest = engine_manifest(app)
+        .ok_or_else(|| "此版本不包含引擎清单，无法下载兼容引擎".to_string())?;
+    engine_source_from(&manifest)
+}
+
+#[tauri::command]
+pub async fn engine_download(app: AppHandle) -> Result<String, String> {
+    let source = engine_source(&app)?;
     let target = paths::downloaded_engine_dir(&app);
     engine_download::download_engine(
         &app,
         &engine_download::DownloadRequest {
-            url,
-            sha256: &sha,
-            bytes,
+            url: source.url,
+            sha256: &source.sha256,
+            bytes: source.bytes,
             target_dir: &target,
         },
     )?;
@@ -473,3 +532,37 @@ pub fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     }
 }
 
+
+#[cfg(test)]
+mod engine_source_tests {
+    use super::*;
+
+    #[test]
+    fn a_manifest_without_a_url_says_so() {
+        // This is the message the user sees; an empty field must not look like a bug.
+        let manifest = serde_json::json!({ "engineZipUrl": "", "engineZipSha256": "" });
+        let err = engine_source_from(&manifest).unwrap_err();
+        assert!(err.contains("不包含引擎下载地址"));
+    }
+
+    #[test]
+    fn a_full_manifest_yields_the_download_details() {
+        let manifest = serde_json::json!({
+            "engineZipUrl": "https://example.invalid/engine.zip",
+            "engineZipSha256": "abc123",
+            "engineZipBytes": 155499416
+        });
+        let source = engine_source_from(&manifest).unwrap();
+        assert_eq!(source.url, "https://example.invalid/engine.zip");
+        assert_eq!(source.sha256, "abc123");
+        assert_eq!(source.bytes, 155499416);
+    }
+
+    #[test]
+    fn a_missing_size_is_zero_not_a_panic() {
+        let manifest = serde_json::json!({ "engineZipUrl": "https://example.invalid/e.zip" });
+        let source = engine_source_from(&manifest).unwrap();
+        assert_eq!(source.bytes, 0);
+        assert!(source.sha256.is_empty());
+    }
+}

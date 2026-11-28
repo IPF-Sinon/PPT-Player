@@ -306,6 +306,26 @@ jobs:
           path: ${{ runner.temp }}/lo-engine.zip
           key: lo-engine-${{ hashFiles('resources/engine.json', 'scripts/prune-engine.ps1', 'scripts/build-engine.ps1') }}
 
+      # Before any build, not after: the manifest is compiled into the app, so writing it
+      # in the upload step left the shipped copy naming the previous release's hash.
+      - name: Record the engine download in the manifest
+        shell: pwsh
+        run: |
+          $zip = Join-Path ${{ runner.temp }} 'lo-engine.zip'
+          if (-not (Test-Path $zip)) {
+            Write-Host '::warning::no engine zip, the manifest keeps its published defaults'
+            exit 0
+          }
+          $version = (Get-Content resources/engine.json -Raw | ConvertFrom-Json).version
+          $sha = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
+          $size = (Get-Item $zip).Length
+          $manifest = Get-Content resources/engine.json -Raw | ConvertFrom-Json
+          $manifest.engineZipUrl = "https://github.com/IPF-Sinon/PPT-Player/releases/latest/download/PPTPlayer-Engine-$version-win-x64.zip"
+          $manifest.engineZipSha256 = $sha
+          $manifest.engineZipBytes = $size
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content resources/engine.json -Encoding utf8
+          Write-Host ('engine manifest: sha256 ' + $sha + ', ' + $size + ' bytes')
+
       - name: Stage the engine tree
         shell: pwsh
         run: |
