@@ -151,15 +151,23 @@ pub fn run() {
 
             let handle = app.handle().clone();
             window.on_window_event(move |event| match event {
-                // Closing the window hides it instead of ending the process. A tray
-                // preload that dies on the first close would have to pay WebView2
-                // startup again for the next class, which is the cost this whole
-                // feature exists to avoid; 完全退出 in the tray menu is the real exit.
+                // Closing the window hides it only when the app is set to start with
+                // the system. That is the case where a warm process is worth keeping:
+                // the next class begins with a double-click, and paying WebView2 startup
+                // again is the cost the preload exists to avoid.
                 //
-                // Only when the tray is actually there: hiding with no tray would leave
-                // a running process nobody can reach.
+                // With autostart off — the default — the X button exits. A program that
+                // will not close unless the user finds the tray is a program people
+                // describe as "it won't quit".
+                //
+                // The tray must also exist: hiding with no tray would leave a running
+                // process nobody can reach.
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    if TRAY_READY.load(Ordering::Relaxed) {
+                    let keep_running = should_keep_running(
+                        TRAY_READY.load(Ordering::Relaxed),
+                        commands::autostart_enabled(&handle),
+                    );
+                    if keep_running {
                         api.prevent_close();
                         if let Some(window) = handle.get_webview_window("main") {
                             let _ = window.hide();
@@ -202,6 +210,19 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("failed to run the app");
+}
+
+/// Whether closing the window should hide it instead of ending the process.
+///
+/// Split out from the window handler so the rule is testable: getting it backwards is
+/// either an app that cannot be closed, or a preload that dies on the first close and
+/// pays WebView2 startup again for the next class.
+fn should_keep_running(tray_ready: bool, autostart: bool) -> bool {
+    // Autostart is what makes a hidden process useful: the user will come back to it by
+    // double-clicking a file. Without it there is no next launch to warm up for.
+    //
+    // The tray must exist too. Hiding with no tray leaves a process with no way back.
+    tray_ready && autostart
 }
 
 /// Whether a switch is present on a command line.
@@ -346,6 +367,18 @@ fn handle_menu_event(app: &AppHandle, id: &str, autostart_item: &CheckMenuItem<W
             let wanted = !commands::autostart_enabled(app);
             let actual = commands::set_autostart_state(app, wanted);
             let _ = autostart_item.set_checked(actual);
+            // Turning autostart off takes away the reason a hidden window was allowed to
+            // stay hidden. If it is hidden now, nothing would ever bring it back except
+            // this menu, so it is shown.
+            if !actual {
+                if let Some(window) = app.get_webview_window("main") {
+                    if !window.is_visible().unwrap_or(true) {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
         }
         // Not window.close(): that would be caught by the hide-on-close handler and the
         // app would never exit.
@@ -360,6 +393,20 @@ mod tests {
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn closing_exits_unless_autostart_is_on() {
+        // The default: no autostart, so the X button ends the process. A program that
+        // will not close is a program people call broken.
+        assert!(!should_keep_running(true, false));
+        assert!(!should_keep_running(false, false));
+
+        // With autostart on, the warm process is the point and closing hides it.
+        assert!(should_keep_running(true, true));
+
+        // But never into a process with no way back: no tray, no hiding.
+        assert!(!should_keep_running(false, true));
     }
 
     #[test]

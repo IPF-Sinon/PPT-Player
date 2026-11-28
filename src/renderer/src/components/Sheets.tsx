@@ -240,7 +240,9 @@ export function SettingsSheet({ open, onClose, onSaved }: SettingsSheetProps) {
           <div className="sheet-row">
             <div>
               <label htmlFor="autostart">开机自启动</label>
-              <p className="sheet-hint">后台预加载，让课堂上双击文件立即打开</p>
+              <p className="sheet-hint">
+                后台预加载，让课堂上双击文件立即打开。开启后关闭窗口会最小化到托盘，需从托盘菜单完全退出
+              </p>
             </div>
             <input
               id="autostart"
