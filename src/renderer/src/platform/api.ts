@@ -95,6 +95,13 @@ export interface PlatformApi {
   recheckEngine(): Promise<EngineStatus>
 
   // ---- shell utilities
+  /**
+   * Tell the shell the UI has mounted.
+   *
+   * The smoke test waits for this marker. A window exists before the renderer runs,
+   * so a window is not proof of a working build; this is.
+   */
+  reportReady(): Promise<void>
   openLog(): Promise<void>
   revealCache(): Promise<void>
   clearCache(): Promise<void>
@@ -294,6 +301,7 @@ const tauriApi: PlatformApi = {
   onEngineDownload: (cb) => subscribe<EngineDownloadProgress>(EVENTS.engineDownload, cb),
   recheckEngine: () => call<EngineStatus>('recheck_engine'),
 
+  reportReady: () => call<void>('report_ready'),
   openLog: () => call<void>('open_log'),
   revealCache: () => call<void>('reveal_cache'),
   clearCache: () => call<void>('clear_cache')

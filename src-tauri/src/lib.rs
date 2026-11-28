@@ -39,6 +39,13 @@ use tauri::{Emitter, Manager};
 /// Start the app.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before anything else: a release build aborts on panic and has no console, so a
+    // crash during startup would otherwise leave no trace at all.
+    log::install_panic_hook();
+    if let Some(dir) = dirs::data_dir() {
+        log::set_file(dir.join("com.ipf.sinon.pptplayer").join("config").join("ppt-player.log"));
+    }
+
     let pending = paths::pending_open_path_from_args(std::env::args().skip(1).collect());
 
     tauri::Builder::default()
@@ -92,15 +99,14 @@ pub fn run() {
         ])
         .setup(|app| {
             log::init(app.handle());
-            let window = tauri::WebviewWindowBuilder::new(
-                app,
-                "main",
-                tauri::WebviewUrl::App("index.html".into()),
-            )
-            .title("PPT 放映器")
-            .inner_size(1280.0, 820.0)
-            .min_inner_size(960.0, 640.0)
-            .build()?;
+
+            // The window is declared in tauri.conf.json, so it already exists here.
+            // Building a second one with the same label made setup fail with
+            // WebviewLabelAlreadyExists, and because release builds abort on panic and
+            // hide the console, that surfaced as the app silently never appearing.
+            let window = app
+                .get_webview_window("main")
+                .ok_or_else(|| "the main window declared in tauri.conf.json is missing")?;
 
             // Leaving fullscreen by any route must put the UI back into preview,
             // otherwise the chrome stays hidden over a normal window.

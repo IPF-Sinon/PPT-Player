@@ -42,6 +42,50 @@
           "English"
         ]
       }
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "pptx",
+          "pptm",
+          "ppsx",
+          "ppsm",
+          "potx"
+        ],
+        "name": "PowerPoint 演示文稿",
+        "description": "PowerPoint 演示文稿",
+        "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "ppt",
+          "pps",
+          "pot"
+        ],
+        "name": "PowerPoint 97-2003 演示文稿",
+        "description": "旧版 PowerPoint 演示文稿",
+        "mimeType": "application/vnd.ms-powerpoint",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "odp"
+        ],
+        "name": "OpenDocument 演示文稿",
+        "description": "OpenDocument 演示文稿",
+        "mimeType": "application/vnd.oasis.opendocument.presentation",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "pdf"
+        ],
+        "name": "PDF 文档",
+        "description": "PDF 文档",
+        "mimeType": "application/pdf",
+        "role": "Editor"
+      }
+    ]
   }
 }

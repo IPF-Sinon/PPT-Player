@@ -14,6 +14,13 @@ export default function App() {
     return off
   }, [])
 
+  // Tell the shell the UI is up. The smoke test waits for this and nothing else: a
+  // window exists before the renderer runs, so a window is not proof of a working
+  // build, but this marker is.
+  useEffect(() => {
+    void platform().reportReady()
+  }, [])
+
   if (mode === 'preview') return <PreviewPage />
   // Playback is loaded on demand: it is only reachable once a deck is open, so its
   // bundle must not weigh on the first paint.

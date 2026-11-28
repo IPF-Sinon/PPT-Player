@@ -267,13 +267,39 @@ fn decode_percent(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// The type a part is served as. OOXML markup is XML; everything else is text.
+/// The type a part is served as.
+///
+/// A slide references images, audio and video, and the webview decides whether it can
+/// decode a part from this header alone. Serving everything as text/plain meant every
+/// embedded picture and every sound failed to load.
 fn content_type_for(part_path: &str) -> &'static str {
     let lower = part_path.to_ascii_lowercase();
-    if lower.ends_with(".xml") || lower.ends_with(".rels") {
-        "application/xml"
-    } else {
-        "text/plain"
+    let ext = lower.rsplit('.').next().unwrap_or_default();
+    match ext {
+        "xml" | "rels" => "application/xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" | "jpe" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "ico" => "image/x-icon",
+        "emf" => "image/emf",
+        "wmf" => "image/wmf",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "avi" => "video/x-msvideo",
+        "mov" => "video/quicktime",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
+        _ => "application/octet-stream",
     }
 }
 

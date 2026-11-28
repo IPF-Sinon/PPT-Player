@@ -31,8 +31,6 @@ opener = "0.7"
 # A second launch must focus the existing window and hand it the file, which is what
 # Electron's second-instance event did.
 tauri-plugin-single-instance = "2"
-# Lets the window accept files dropped on it.
-tauri-plugin-dialog = "2"
 
 [dev-dependencies]
 tempfile = "3"

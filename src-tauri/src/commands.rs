@@ -70,32 +70,49 @@ pub fn probe(path: String) -> ProbeResult {
     })
 }
 
+/// Emit a conversion progress event.
+///
+/// The UI shows a progress bar from these; without them the bar sits at whatever it
+/// started with, which reads as a hang on a slow conversion.
+fn emit_progress(app: &AppHandle, stage: ConvertStage, ratio: f64, message: &str, deck_id: &str) {
+    let _ = app.emit(
+        "deck:progress",
+        ConvertProgress {
+            deck_id: deck_id.to_string(),
+            stage,
+            ratio,
+            message: message.to_string(),
+        },
+    );
+}
+
+/// Open a deck, converting it when the format needs it.
+///
+/// Async on purpose: a conversion takes tens of seconds, and a synchronous command
+/// runs on the main thread, so the window would freeze and stop painting for the whole
+/// conversion. The work itself goes to the blocking pool, which is where a
+/// long-running child process belongs.
 #[tauri::command]
-pub fn open(app: AppHandle, path: String) -> OpenResult {
-    // The UI shows a progress bar from these events. Without them the bar sits at
-    // whatever it started with, which reads as a hang on a slow conversion.
-    let emit = |stage: ConvertStage, ratio: f64, message: &str, deck_id: &str| {
-        let _ = app.emit(
-            "deck:progress",
-            ConvertProgress {
-                deck_id: deck_id.to_string(),
-                stage,
-                ratio,
-                message: message.to_string(),
-            },
-        );
-    };
+pub async fn open(app: AppHandle, path: String) -> OpenResult {
+    emit_progress(&app, ConvertStage::Probe, 0.05, "正在识别文件", "");
+    emit_progress(&app, ConvertStage::Convert, 0.15, "正在转换", "");
 
-    emit(ConvertStage::Probe, 0.05, "正在识别文件", "");
-    emit(ConvertStage::Convert, 0.15, "正在转换", "");
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || convert::open_deck(&worker_app, &path))
+        .await;
 
-    match convert::open_deck(&app, &path) {
-        Ok(info) => {
-            emit(ConvertStage::Done, 1.0, "完成", &info.deck_id);
+    match result {
+        Ok(Ok(info)) => {
+            emit_progress(&app, ConvertStage::Done, 1.0, "完成", &info.deck_id);
             OpenResult::ok(info)
         }
-        Err(message) => {
-            emit(ConvertStage::Failed, 0.0, &message, "");
+        Ok(Err(message)) => {
+            emit_progress(&app, ConvertStage::Failed, 0.0, &message, "");
+            OpenResult::err("open-failed", message)
+        }
+        Err(err) => {
+            let message = format!("转换任务异常结束：{err}");
+            emit_progress(&app, ConvertStage::Failed, 0.0, &message, "");
             OpenResult::err("open-failed", message)
         }
     }
@@ -114,7 +131,23 @@ pub fn open_native(
     }
     let vfs = zip_vfs::ZipVfs::open(p).ok()?;
     let index = index_parse::build_presentation_index(&vfs)?;
-    let deck_id = uuid::Uuid::new_v4().simple().to_string();
+
+    // The id keys the annotation file, so it has to be the same for the same file
+    // across sessions. A random id meant annotations were written under one name and
+    // looked up under another, which loses them on the next launch or on a switch to
+    // compatible mode and back.
+    let meta = std::fs::metadata(p).ok()?;
+    let mtime_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as f64)
+        .unwrap_or(0.0);
+    let deck_id = convert::deck_id_for(&convert::SourceKey {
+        path: &path,
+        bytes: meta.len(),
+        mtime_ms,
+    });
 
     let result = NativeOpenResult {
         deck_id: deck_id.clone(),

@@ -15,10 +15,42 @@ static LOG_FILE: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
 pub fn init(app: &AppHandle) {
     let dir = crate::paths::config_dir(app);
     let _ = crate::paths::ensure_dir(&dir);
-    let path = dir.join("ppt-player.log");
+    set_file(dir.join("ppt-player.log"));
+}
+
+/// Point the logger at an explicit file.
+///
+/// Separate from init so the path can be set before the app handle exists: a panic
+/// during startup has to be recorded, and by definition it happens before there is
+/// anything to ask for a directory.
+pub fn set_file(path: std::path::PathBuf) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
     if let Ok(mut slot) = LOG_FILE.lock() {
         *slot = Some(path);
     }
+}
+
+/// Install a panic hook that records the panic before the process dies.
+///
+/// Release builds abort on panic and hide the console, so without this a crash during
+/// startup is completely silent: the app simply never appears.
+pub fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown location".to_string());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "no message".to_string());
+        write(&format!("[panic] {payload} at {location}"));
+        eprintln!("[panic] {payload} at {location}");
+    }));
 }
 
 /// Append a line. Never fails loudly.
