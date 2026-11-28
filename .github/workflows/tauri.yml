@@ -206,15 +206,24 @@ jobs:
         run: pnpm build
 
       # The CLI ships as an npm package with a prebuilt binary. Installing it from
-      # source took about twelve minutes a run, and cargo-binstall does not start
-      # on this image, so npm is the reliable path. This runs after pnpm install
-      # because pnpm would otherwise prune it as an extraneous package.
+      # source took about twelve minutes a run, and cargo-binstall does not start on
+      # this image, so the package is the reliable path.
+      #
+      # It is installed in its own directory: running npm install at the repo root
+      # fails with EUNSUPPORTEDPROTOCOL because the workspace packages use the
+      # "workspace:*" protocol, which npm cannot resolve.
       - name: Install Tauri CLI
         shell: pwsh
         run: |
-          npm install --no-save @tauri-apps/cli@2
-          if ($LASTEXITCODE -ne 0) { throw 'tauri cli install failed' }
-          npx tauri --version
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\tauri-cli" | Out-Null
+          Push-Location "$env:RUNNER_TEMP\tauri-cli"
+          Set-Content -Path package.json -Value '{"name":"cli","private":true}'
+          npm install @tauri-apps/cli@2 --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'tauri cli install failed' }
+          Pop-Location
+          # The binary is invoked by absolute path from here on.
+          "$env:RUNNER_TEMP\tauri-cli\node_modules\.bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & "$env:RUNNER_TEMP\tauri-cli\node_modules\.bin\tauri.cmd" --version
 
       # The engine zip is built by ci.yml, and actions/download-artifact only sees
       # artifacts from the same workflow run, so it cannot be pulled across here.
@@ -278,7 +287,7 @@ jobs:
       - name: Build lite
         shell: pwsh
         run: |
-          npx tauri build --config src-tauri/tauri.conf.json --bundles nsis 2>&1 | Tee-Object -FilePath tauri-lite.log
+          tauri build --config src-tauri/tauri.conf.json --bundles nsis 2>&1 | Tee-Object -FilePath tauri-lite.log
           if ($LASTEXITCODE -ne 0) {
             Get-Content tauri-lite.log -Tail 80
             throw 'tauri build (lite) failed'
@@ -374,7 +383,7 @@ jobs:
           if (Test-Path 'src-tauri/target/release/bundle/nsis') {
             Remove-Item -Recurse -Force 'src-tauri/target/release/bundle/nsis'
           }
-          npx tauri build --config src-tauri/tauri.full.conf.json --bundles nsis 2>&1 | Tee-Object -FilePath tauri-full.log
+          tauri build --config src-tauri/tauri.full.conf.json --bundles nsis 2>&1 | Tee-Object -FilePath tauri-full.log
           if ($LASTEXITCODE -ne 0) {
             Get-Content tauri-full.log -Tail 80
             throw 'tauri build (full) failed'
