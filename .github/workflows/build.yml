@@ -67,4 +67,3 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "app version $version -> tag $tag"
 
-  rust:
