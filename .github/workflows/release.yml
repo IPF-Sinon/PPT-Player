@@ -542,12 +542,13 @@ jobs:
           body: |
             Tauri 2 shell, replacing the Electron runtime.
 
-            - Lite (`PPTPlayer-Setup-x64-lite.exe`): the app alone. It opens PDF and
-              PPTX directly; other formats offer to download the compatibility engine
-              on first use.
-            - Full (`PPTPlayer-Setup-x64-full.exe`): ships the pruned LibreOffice
-              engine, so every format works offline.
+            Lite (PPTPlayer-Setup-x64-lite.exe): the app alone. It opens PDF and PPTX
+            directly; other formats offer to download the compatibility engine on
+            first use.
 
-            `sha256sums.txt` covers every file above.
+            Full (PPTPlayer-Setup-x64-full.exe): ships the pruned LibreOffice engine,
+            so every format works offline.
+
+            sha256sums.txt covers every file above.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
