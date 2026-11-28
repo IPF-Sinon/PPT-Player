@@ -153,6 +153,88 @@ pub struct AppSettings {
     pub nav_button_position: NavPosition,
     pub keep_toolbar_in_ink_mode: bool,
     pub ink_on_exit: InkOnExit,
+    /// Per-category view and toolbar, so a document reads and a deck presents.
+    pub bindings: Bindings,
+    /// Start with Windows to preload the webview.
+    pub autostart: bool,
+}
+
+/// What a file is for the purpose of choosing a view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DocumentCategory {
+    Ppt,
+    Pdf,
+    Docx,
+    Xls,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ViewMode {
+    Slide,
+    SingleColumn,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolbarStyle {
+    Bar,
+    Fab,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryBinding {
+    pub view_mode: ViewMode,
+    pub toolbar_style: ToolbarStyle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bindings {
+    pub ppt: CategoryBinding,
+    pub pdf: CategoryBinding,
+    pub docx: CategoryBinding,
+    pub xls: CategoryBinding,
+}
+
+impl Default for Bindings {
+    fn default() -> Self {
+        // A presentation is shown a slide at a time with the familiar bar. Everything
+        // else is a document to read: one continuous column, and a toolbar that stays
+        // out of the text.
+        Self {
+            ppt: CategoryBinding {
+                view_mode: ViewMode::Slide,
+                toolbar_style: ToolbarStyle::Bar,
+            },
+            pdf: CategoryBinding {
+                view_mode: ViewMode::SingleColumn,
+                toolbar_style: ToolbarStyle::Fab,
+            },
+            docx: CategoryBinding {
+                view_mode: ViewMode::SingleColumn,
+                toolbar_style: ToolbarStyle::Fab,
+            },
+            xls: CategoryBinding {
+                view_mode: ViewMode::SingleColumn,
+                toolbar_style: ToolbarStyle::Fab,
+            },
+        }
+    }
+}
+
+impl Bindings {
+    /// The binding for a category.
+    pub fn for_category(&self, category: DocumentCategory) -> CategoryBinding {
+        match category {
+            DocumentCategory::Ppt => self.ppt,
+            DocumentCategory::Pdf => self.pdf,
+            DocumentCategory::Docx => self.docx,
+            DocumentCategory::Xls => self.xls,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,6 +262,8 @@ impl Default for AppSettings {
             nav_button_position: NavPosition::Bottom,
             keep_toolbar_in_ink_mode: true,
             ink_on_exit: InkOnExit::Ask,
+            bindings: Bindings::default(),
+            autostart: false,
         }
     }
 }
@@ -324,4 +408,6 @@ pub struct SettingsPatch {
     pub nav_button_position: Option<NavPosition>,
     pub keep_toolbar_in_ink_mode: Option<bool>,
     pub ink_on_exit: Option<InkOnExit>,
+    pub bindings: Option<Bindings>,
+    pub autostart: Option<bool>,
 }

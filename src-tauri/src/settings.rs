@@ -63,6 +63,12 @@ pub fn apply_patch(current: &mut AppSettings, patch: SettingsPatch) {
     if let Some(v) = patch.ink_on_exit {
         current.ink_on_exit = v;
     }
+    if let Some(v) = patch.bindings {
+        current.bindings = v;
+    }
+    if let Some(v) = patch.autostart {
+        current.autostart = v;
+    }
 }
 
 /// Read settings from arbitrary JSON, keeping a default for anything unusable.
@@ -98,6 +104,46 @@ pub fn parse_settings(value: &serde_json::Value) -> AppSettings {
             "discard" => crate::types::InkOnExit::Discard,
             _ => crate::types::InkOnExit::Ask,
         };
+    }
+    if let Some(v) = value.get("autostart").and_then(|v| v.as_bool()) {
+        out.autostart = v;
+    }
+    if let Some(bindings) = value.get("bindings") {
+        out.bindings = parse_bindings(bindings);
+    }
+    out
+}
+
+/// Read the per-category bindings, keeping a default for any unusable entry.
+fn parse_bindings(value: &serde_json::Value) -> crate::types::Bindings {
+    let mut out = crate::types::Bindings::default();
+    for (key, slot) in [
+        ("ppt", &mut out.ppt),
+        ("pdf", &mut out.pdf),
+        ("docx", &mut out.docx),
+        ("xls", &mut out.xls),
+    ] {
+        let Some(entry) = value.get(key) else { continue };
+        if let Some(v) = entry.get("viewMode").and_then(|v| v.as_str()) {
+            *slot = crate::types::CategoryBinding {
+                view_mode: if v == "single-column" {
+                    crate::types::ViewMode::SingleColumn
+                } else {
+                    crate::types::ViewMode::Slide
+                },
+                ..*slot
+            };
+        }
+        if let Some(v) = entry.get("toolbarStyle").and_then(|v| v.as_str()) {
+            *slot = crate::types::CategoryBinding {
+                toolbar_style: if v == "fab" {
+                    crate::types::ToolbarStyle::Fab
+                } else {
+                    crate::types::ToolbarStyle::Bar
+                },
+                ..*slot
+            };
+        }
     }
     out
 }
@@ -143,5 +189,48 @@ mod tests {
         );
         assert_eq!(settings.cache_budget_mb, 512);
         assert_eq!(settings.ink_on_exit, crate::types::InkOnExit::Keep);
+    }
+
+    #[test]
+    fn a_presentation_keeps_the_slide_view_and_a_document_does_not() {
+        // The defaults are a product decision: a deck is presented, a document is read.
+        let bindings = crate::types::Bindings::default();
+        let ppt = bindings.for_category(crate::types::DocumentCategory::Ppt);
+        assert_eq!(ppt.view_mode, crate::types::ViewMode::Slide);
+        assert_eq!(ppt.toolbar_style, crate::types::ToolbarStyle::Bar);
+
+        for category in [
+            crate::types::DocumentCategory::Pdf,
+            crate::types::DocumentCategory::Docx,
+            crate::types::DocumentCategory::Xls,
+        ] {
+            let binding = bindings.for_category(category);
+            assert_eq!(binding.view_mode, crate::types::ViewMode::SingleColumn);
+            assert_eq!(binding.toolbar_style, crate::types::ToolbarStyle::Fab);
+        }
+    }
+
+    #[test]
+    fn one_broken_binding_does_not_reset_the_others() {
+        let settings = parse_settings(&serde_json::json!({
+            "bindings": {
+                "ppt": { "viewMode": "single-column", "toolbarStyle": "fab" },
+                "docx": { "viewMode": "nonsense" }
+            }
+        }));
+        // The explicit values are honoured...
+        assert_eq!(settings.bindings.ppt.view_mode, crate::types::ViewMode::SingleColumn);
+        assert_eq!(settings.bindings.ppt.toolbar_style, crate::types::ToolbarStyle::Fab);
+        // ...an unusable one falls back, and the untouched categories keep defaults.
+        assert_eq!(settings.bindings.docx.view_mode, crate::types::ViewMode::Slide);
+        assert_eq!(settings.bindings.pdf.view_mode, crate::types::ViewMode::SingleColumn);
+    }
+
+    #[test]
+    fn autostart_defaults_to_off() {
+        // Starting with the OS is a decision the user makes, not one the app makes.
+        assert!(!crate::types::AppSettings::default().autostart);
+        assert!(!parse_settings(&serde_json::json!({})).autostart);
+        assert!(parse_settings(&serde_json::json!({ "autostart": true })).autostart);
     }
 }

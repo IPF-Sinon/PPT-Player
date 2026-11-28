@@ -96,6 +96,24 @@ export interface AppSettings {
   keepToolbarInInkMode: boolean
   /** What to do with this session's annotations when the show ends. */
   inkOnExit: 'ask' | 'keep' | 'discard'
+  /** Per-category default view and toolbar, so a document reads and a deck presents. */
+  bindings: Record<DocumentCategory, CategoryBinding>
+  /** Start with Windows to preload the webview, so a later launch is instant. */
+  autostart: boolean
+}
+
+/** What a file is for the purpose of choosing a view. */
+export type DocumentCategory = 'ppt' | 'pdf' | 'docx' | 'xls'
+
+/** How pages are laid out. */
+export type ViewMode = 'slide' | 'single-column'
+
+/** How the playback toolbar is presented. */
+export type ToolbarStyle = 'bar' | 'fab'
+
+export interface CategoryBinding {
+  viewMode: ViewMode
+  toolbarStyle: ToolbarStyle
 }
 
 /** Everything the first screen needs, returned in one IPC round trip. */
