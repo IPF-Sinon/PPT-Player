@@ -30,8 +30,7 @@ env:
   NODE_VERSION: 24
 
 jobs:
-  # A tag that disagrees with package.json would publish installers whose version
-  # string contradicts the release name, so this is checked before anything is built.
+  version:
     name: check version
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -67,3 +66,44 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "app version $version -> tag $tag"
 
+  rust:
+    name: cargo check and test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: tauri-rust-${{ hashFiles('src-tauri/Cargo.toml', 'src-tauri/build.rs') }}
+          restore-keys: tauri-rust-
+
+      - name: Icon and frontend placeholder
+        shell: pwsh
+        run: |
+          node scripts/make-tauri-icon.mjs
+          # generate_context! reads the frontend dist at compile time and panics when
+          # it is missing. The Rust job does not build the UI, so a placeholder is
+          # written here; the packaging job builds the real one.
+          New-Item -ItemType Directory -Force -Path out/renderer | Out-Null
+          if (-not (Test-Path out/renderer/index.html)) {
+            Set-Content -Path out/renderer/index.html -Value '<!doctype html><title>placeholder</title>'
+          }
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --all-targets 2>&1 | Tee-Object -FilePath ../cargo-test.log
+
+      # Warnings are reported but do not fail the job while modules are still being
+      # filled in; the last step flips this to a gate once the tree is complete.
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets 2>&1 | Tee-Object -FilePath ../cargo-clippy.log
