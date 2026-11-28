@@ -225,12 +225,11 @@ jobs:
           "$env:RUNNER_TEMP\tauri-cli\node_modules\.bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           & "$env:RUNNER_TEMP\tauri-cli\node_modules\.bin\tauri.cmd" --version
 
-      # The engine zip is built by ci.yml, and actions/download-artifact only sees
-      # artifacts from the same workflow run, so it cannot be pulled across here.
-      # ci.yml caches the same zip under a key derived from these three files, and
-      # actions/cache is repo-scoped, so restoring that key is how this job reaches
-      # it. A miss is not fatal: the full installer is skipped, not failed, because
-      # the lite build is the one that has to work unconditionally.
+      # The engine zip used to be produced by ci.yml and pulled across the cache, but
+      # that workflow no longer builds it, so the cache is always empty and the full
+      # installer was skipped on every run. It is built here instead, cached on the
+      # scripts that define its contents, and a miss is not fatal: the lite build is
+      # the one that has to work unconditionally.
       - name: Restore the engine zip
         id: engine-zip
         uses: actions/cache/restore@v5
@@ -238,6 +237,21 @@ jobs:
           path: ${{ runner.temp }}/lo-engine.zip
           key: lo-engine-${{ hashFiles('resources/engine.json', 'scripts/prune-engine.ps1', 'scripts/build-engine.ps1') }}
           restore-keys: lo-engine-
+
+      - name: Build the engine zip
+        if: steps.engine-zip.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          ./scripts/build-engine.ps1 -Version 25.8.7
+          if (-not (Test-Path "${{ runner.temp }}/lo-engine.zip")) { throw 'engine zip was not produced' }
+          Write-Host ("engine zip: {0:N1} MB" -f ((Get-Item "${{ runner.temp }}/lo-engine.zip").Length / 1MB))
+
+      - name: Save the engine zip
+        if: steps.engine-zip.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/lo-engine.zip
+          key: lo-engine-${{ hashFiles('resources/engine.json', 'scripts/prune-engine.ps1', 'scripts/build-engine.ps1') }}
 
       - name: Stage the engine tree
         shell: pwsh
