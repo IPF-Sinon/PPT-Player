@@ -14,7 +14,7 @@ async function loadSlide() {
   const readText = async (p: string): Promise<string | null> => vfs.readText(p)
   const theme = await loadTheme({ readText, themePaths: index.themes })
   const slide = await parseSlide(
-    { deckId: 'cccccccccccc', theme, readText, slideSize: index.slideSize },
+    { deckId: 'cccccccccccc', theme, readText, pptxUrl: (id, part) => 'http://pptx.localhost/' + id + '/' + part, slideSize: index.slideSize },
     index.slides[0].path,
     0
   )

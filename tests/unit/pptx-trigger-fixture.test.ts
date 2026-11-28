@@ -15,7 +15,7 @@ async function loadFixture() {
   const readText = async (p: string): Promise<string | null> => vfs.readText(p)
   const theme = await loadTheme({ readText, themePaths: index.themes })
   const slide = await parseSlide(
-    { deckId: 'bbbbbbbbbbbb', theme, readText, slideSize: index.slideSize },
+    { deckId: 'bbbbbbbbbbbb', theme, readText, pptxUrl: (id, part) => 'http://pptx.localhost/' + id + '/' + part, slideSize: index.slideSize },
     index.slides[0].path,
     0
   )

@@ -24,6 +24,13 @@ export default function PreviewPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** Set when the lite build needs the engine to open the requested file. */
   const [enginePrompt, setEnginePrompt] = useState<{ bytes: number; retry: () => void } | null>(null)
+  /**
+   * Bumped when a slide finishes parsing.
+   *
+   * The deck mutates its slide cache in place, so nothing React watches changes when
+   * a slide arrives; this is the signal that a repaint is due.
+   */
+  const [, setSlideTick] = useState(0)
   const queue = useMemo(() => new RenderQueue(), [])
   const openToken = useRef(0)
 
@@ -325,7 +332,28 @@ export default function PreviewPage() {
   const pageCount = tab?.pageCount ?? 0
   const pageIndex = tab?.currentPage ?? 0
   const isNative = tab?.engineMode === 'native-pptx'
-  const currentSlide = isNative ? tab?.nativeDeck?.slides[pageIndex] ?? null : null
+  const nativeDeck = tab?.nativeDeck ?? null
+  const currentSlide = isNative ? nativeDeck?.slides[pageIndex] ?? null : null
+
+  /**
+   * Parse the slide the stage is showing.
+   *
+   * Only the first slide is parsed when a deck opens, so jumping to a later page
+   * found an empty cache entry and drew nothing. The rail parses in the background,
+   * but a jump can outrun it, and jumping is what a presenter actually does.
+   */
+  useEffect(() => {
+    if (!isNative || !nativeDeck) return
+    if (nativeDeck.slides[pageIndex]) return
+    let cancelled = false
+    void nativeDeck.loadSlide(pageIndex).then(() => {
+      // The cache is mutated in place, so a render has to be asked for.
+      if (!cancelled) setSlideTick((n) => n + 1)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isNative, nativeDeck, pageIndex])
 
   return (
     <div className="preview" data-testid="preview-page">

@@ -61,7 +61,14 @@ export async function loadNativeDeck(
   const slides: Array<SlideModel | null> = new Array(slidePaths.length).fill(null)
   let hasComplex = false
 
-  const ctx: SlideLoadContext = { deckId, theme, readText, slideSize }
+  const ctx: SlideLoadContext = {
+    deckId,
+    theme,
+    readText,
+    // Passed through so images use the same host-served URL as the parts.
+    pptxUrl: (id, part) => api.pptxUrl(id, part),
+    slideSize
+  }
 
   const loadSlide = async (index: number): Promise<SlideModel | null> => {
     if (index < 0 || index >= slidePaths.length) return null

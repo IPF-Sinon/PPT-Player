@@ -55,6 +55,14 @@ export interface SlideLoadContext {
   theme: Theme
   /** Fetch an internal part as text. */
   readText(partPath: string): Promise<string | null>
+  /**
+   * URL for an internal part such as an image.
+   *
+   * Injected rather than built here: the URL shape belongs to the shell that serves
+   * the archive, and hard-coding one meant every image pointed at a scheme the host
+   * does not serve, so pictures silently failed to load.
+   */
+  pptxUrl(deckId: string, partPath: string): string
   /** Slide canvas size in px. */
   slideSize: { width: number; height: number }
 }
@@ -73,7 +81,7 @@ function imageUrl(ctx: SlideLoadContext, partPath: string, relId: string, rels: 
   const rel = rels.get(relId)
   if (!rel) return null
   const target = resolvePartTarget(partPath, rel.target)
-  return 'app://pptx/' + ctx.deckId + '/' + target
+  return ctx.pptxUrl(ctx.deckId, target)
 }
 
 /** Read the blipFill of a background or shape into a Paint. */
@@ -430,6 +438,16 @@ export async function parseSlide(
   const rawShapeCount = spTree ? descendants(spTree, 'sp').length : 0
   if (!complex && rawShapeCount > 0 && visibleElements.length === 0) {
     complex = true
+  }
+
+  // A picture the webview cannot decode draws as an empty box, which is worse than
+  // saying so: the slide looks fine until the missing diagram is noticed mid-lesson.
+  // These formats appear in real teaching decks, usually as pasted diagrams.
+  if (!complex) {
+    complex = elements.some(
+      (el) =>
+        el.type === 'picture' && /\.(tiff?|emf|wmf)(\?|$)/i.test(el.src)
+    )
   }
 
   const timing = first(root, 'timing')

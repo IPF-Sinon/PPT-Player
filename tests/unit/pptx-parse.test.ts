@@ -178,7 +178,13 @@ describe('parseSlide on a real deck', () => {
     const index = buildPresentationIndex(vfs)!
     const readText = async (partPath: string): Promise<string | null> => vfs.readText(partPath)
     const theme = await loadTheme({ readText, themePaths: index.themes })
-    const ctx = { deckId: 'a1b2c3d4e5f6', theme, readText, slideSize: index.slideSize }
+    const ctx = {
+      deckId: 'a1b2c3d4e5f6',
+      theme,
+      readText,
+      pptxUrl: (id: string, part: string) => 'http://pptx.localhost/' + id + '/' + part,
+      slideSize: index.slideSize
+    }
     return parseSlide(ctx, index.slides[which].path, which)
   }
 
@@ -243,12 +249,15 @@ describe('parseSlide on a real deck', () => {
     expect(cellText.join(' ')).toContain('项目')
   })
 
-  it('resolves the picture to an app://pptx url', async () => {
+  it('resolves the picture through the host URL', async () => {
     const slide = await loadSlide(0)
     const picture = slide!.elements.find((el) => el.type === 'picture')
     expect(picture).toBeDefined()
     if (picture?.type !== 'picture') throw new Error('picture missing')
-    expect(picture.src).toMatch(/^app:\/\/pptx\/a1b2c3d4e5f6\/ppt\/media\//)
+    // The scheme is the shell's business. Asserting app:// here is what let the
+    // hard-coded URL survive into a build where nothing served it.
+    expect(picture.src).toMatch(/^http:\/\/pptx\.localhost\/a1b2c3d4e5f6\/ppt\/media\//)
+    expect(picture.src).not.toContain('app://')
   })
 
   it('reports a plain deck as having no complex objects', async () => {
@@ -267,5 +276,36 @@ describe('parseSlide on a real deck', () => {
     const slide = await loadSlide(1)
     expect(slide!.index).toBe(1)
     expect(slide!.elements.length).toBeGreaterThan(0)
+  })
+})
+
+describe('image URLs', () => {
+  /**
+   * Every image URL must come from the host. A hard-coded scheme here is invisible
+   * until a real deck with pictures is opened, at which point every image silently
+   * fails to load because the shell does not serve that scheme.
+   */
+  it('builds picture sources through the injected host URL', async () => {
+    const index = buildPresentationIndex(vfs)!
+    const readText = async (partPath: string): Promise<string | null> => vfs.readText(partPath)
+    const theme = await loadTheme({ readText, themePaths: index.themes })
+    const seen: string[] = []
+    const ctx = {
+      deckId: 'a1b2c3d4e5f6',
+      theme,
+      readText,
+      pptxUrl: (id: string, part: string) => {
+        seen.push(id + '/' + part)
+        return 'http://pptx.localhost/' + id + '/' + part
+      },
+      slideSize: index.slideSize
+    }
+    const slide = await parseSlide(ctx, index.slides[0].path, 0)
+    expect(slide).not.toBeNull()
+    for (const element of slide!.elements) {
+      if (element.type !== 'picture') continue
+      expect(element.src).not.toContain('app://')
+      expect(element.src.startsWith('http://pptx.localhost/')).toBe(true)
+    }
   })
 })

@@ -121,7 +121,7 @@ export interface ShapeElement extends ShapeBase {
 
 export interface PictureElement extends ShapeBase {
   type: 'picture'
-  /** app://pptx/<deckId>/ppt/media/... */
+  /** URL produced by the host's pptxUrl(), e.g. http://pptx.localhost/<deckId>/ppt/media/... */
   src: string
   /** Source cropping as fractions of the image, 0..1. */
   crop?: { left: number; top: number; right: number; bottom: number }

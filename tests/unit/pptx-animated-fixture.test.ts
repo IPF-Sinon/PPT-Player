@@ -18,7 +18,7 @@ describe('animated deck', () => {
     const index = buildPresentationIndex(vfs)!
     const readText = async (p: string): Promise<string | null> => vfs.readText(p)
     const theme = await loadTheme({ readText, themePaths: index.themes })
-    const slide = await parseSlide({ deckId: 'aaaaaaaaaaaa', theme, readText, slideSize: index.slideSize }, index.slides[0].path, 0)
+    const slide = await parseSlide({ deckId: 'aaaaaaaaaaaa', theme, readText, pptxUrl: (id, part) => 'http://pptx.localhost/' + id + '/' + part, slideSize: index.slideSize }, index.slides[0].path, 0)
     vfs.close()
 
     expect(slide).not.toBeNull()
@@ -38,7 +38,7 @@ describe('animated deck', () => {
     const index = buildPresentationIndex(vfs)!
     const readText = async (p: string): Promise<string | null> => vfs.readText(p)
     const theme = await loadTheme({ readText, themePaths: index.themes })
-    const slide = await parseSlide({ deckId: 'aaaaaaaaaaaa', theme, readText, slideSize: index.slideSize }, index.slides[0].path, 0)
+    const slide = await parseSlide({ deckId: 'aaaaaaaaaaaa', theme, readText, pptxUrl: (id, part) => 'http://pptx.localhost/' + id + '/' + part, slideSize: index.slideSize }, index.slides[0].path, 0)
     vfs.close()
 
     const steps = slide!.steps
