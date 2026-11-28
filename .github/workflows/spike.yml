@@ -161,8 +161,12 @@ jobs:
           Write-Host "::group::electron baseline"
           $env:ELECTRON_DISABLE_SECURITY_WARNINGS = "true"
           $main = Resolve-Path "out/main/index.js"
+          $exe = Resolve-Path "node_modules/electron/dist/electron.exe"
+          # Two launches, mirroring the Tauri measurement: the first pays any one-off
+          # cost, the second is what a user sees on a normal start.
+          foreach ($pass in 1, 2) {
           $start = Get-Date
-          $proc = Start-Process -FilePath "node_modules/electron/dist/electron.exe" -ArgumentList $main -PassThru
+          $proc = Start-Process -FilePath $exe -ArgumentList $main -PassThru
           # Poll for the first window rather than sleeping: that is the moment a user
           # would see something appear.
           $firstWindow = $null
@@ -176,10 +180,12 @@ jobs:
           }
           if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           if ($null -eq $firstWindow) {
-            Write-Host "::warning::electron window never appeared"
+            Write-Host "::warning::electron window never appeared (pass $pass)"
           } else {
-            Write-Host ("ELECTRON_WINDOW_MS={0:N0}" -f $firstWindow)
-            ("ELECTRON_WINDOW_MS={0:N0}" -f $firstWindow) | Tee-Object -FilePath spike-size.txt -Append
+            Write-Host ("ELECTRON_WINDOW_MS pass{0}={1:N0}" -f $pass, $firstWindow)
+            ("ELECTRON_WINDOW_MS pass{0}={1:N0}" -f $pass, $firstWindow) | Tee-Object -FilePath spike-size.txt -Append
+          }
+          Start-Sleep -Seconds 2
           }
           Write-Host "::endgroup::"
 
