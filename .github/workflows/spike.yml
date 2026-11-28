@@ -150,6 +150,9 @@ jobs:
       - name: Build the Electron baseline
         run: |
           pnpm install --frozen-lockfile
+          # The Electron binary is fetched on first use, so this is what makes the
+          # dist directory exist at all.
+          pnpm exec electron --version
           pnpm build
 
       - name: Measure Electron for comparison
