@@ -352,9 +352,16 @@ function buildDocx() {
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
         '<w:body>' +
-        '<w:p><w:r><w:t>第一段：课堂讲义。</w:t></w:r></w:p>' +
-        '<w:p><w:r><w:t>第二段：用于验证 Writer 转换。</w:t></w:r></w:p>' +
-        '<w:sectPr/>' +
+        // One paragraph on an explicitly sized page: the fixture exists to prove the
+        // Writer library converts at all, and a page count that depends on how much
+        // text happens to fit is a test that fails for the wrong reason.
+        '<w:p><w:r><w:t>课堂讲义：用于验证 Writer 转换。</w:t></w:r></w:p>' +
+        // An explicit page size and margins, because an empty sectPr leaves Writer to
+        // its own defaults and the resulting page count is not something to depend on.
+        '<w:sectPr>' +
+        '<w:pgSz w:w="11906" w:h="16838"/>' +
+        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>' +
+        '</w:sectPr>' +
         '</w:body></w:document>'
     )
   }

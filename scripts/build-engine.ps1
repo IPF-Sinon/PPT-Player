@@ -114,6 +114,9 @@ function Invoke-Smoke {
     New-Item -ItemType Directory -Force -Path $out | Out-Null
     $profileDir = Join-Path $smokeDir ('profile-' + [guid]::NewGuid().ToString('N'))
     $profileUrl = 'file:///' + ($profileDir -replace '\\', '/')
+    # Stamped before the conversion so a stale PDF from an earlier run cannot be
+    # mistaken for the one this conversion was supposed to produce.
+    $startedUtc = (Get-Date).ToUniversalTime()
 
     # Each application has its own PDF exporter. Naming the wrong one converts
     # nothing, and the failure reads as a timeout rather than a wrong filter.
@@ -135,7 +138,13 @@ function Invoke-Smoke {
       throw "[$Label] conversion timed out for $fixture"
     }
     $pdf = Join-Path $out "$stem.pdf"
+    # The output directory is per fixture, but a failed conversion leaves whatever was
+    # there before. Without a freshness check a stale PDF from an earlier run can pass
+    # for a conversion that never happened.
     if (-not (Test-Path $pdf)) { throw "[$Label] conversion produced no PDF for $fixture" }
+    if ((Get-Item $pdf).LastWriteTimeUtc -lt $startedUtc) {
+      throw "[$Label] the PDF for $fixture predates this conversion; it was not produced by it"
+    }
     $bytes = (Get-Item $pdf).Length
     if ($bytes -lt 1024) { throw "[$Label] PDF for $fixture is too small: $bytes bytes" }
 
