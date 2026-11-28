@@ -420,7 +420,14 @@ jobs:
           # the engine or a webview runtime came along by accident.
           if ($installer.Length -ge 20MB) {
             # Name what is large instead of only that something is.
-            Write-Host '--- largest directories in the release folder ---'
+            Write-Host '--- what the bundle step actually read ---'
+            Write-Host ('resources/lo exists: ' + (Test-Path 'resources/lo'))
+            Write-Host ('resources/lo-full exists: ' + (Test-Path 'resources/lo-full'))
+            if (Test-Path 'resources/lo-full') {
+              $mb = [math]::Round(((Get-ChildItem 'resources/lo-full' -Recurse -File |
+                Measure-Object Length -Sum).Sum / 1MB), 1)
+              Write-Host ('resources/lo-full: ' + $mb + ' MB')
+            }
             Get-ChildItem 'src-tauri/target/release' -Directory -ErrorAction SilentlyContinue |
               ForEach-Object {
                 $size = (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
@@ -429,6 +436,11 @@ jobs:
                   Write-Host ('  ' + $_.Name + ': ' + [math]::Round($size / 1MB, 1) + ' MB')
                 }
               }
+            # The installer is the artifact that is too big, so say what is inside it.
+            Write-Host '--- bundle inputs ---'
+            Get-ChildItem 'src-tauri/target/release' -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Length -gt 5MB } |
+              ForEach-Object { Write-Host ('  ' + $_.Name + ': ' + [math]::Round($_.Length / 1MB, 1) + ' MB') }
             throw ('lite installer is ' + $liteMb + ' MB, the budget is 20 MB')
           }
           Copy-Item $installer.FullName 'artifacts/PPTPlayer-Setup-x64-lite.exe' -Force
