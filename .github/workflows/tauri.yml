@@ -242,6 +242,9 @@ jobs:
         if: steps.engine-zip.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
+          # The build script converts a smoke deck to prove the engine works, so the
+          # fixtures have to exist first.
+          node scripts/make-fixtures.mjs
           ./scripts/build-engine.ps1 -Version 25.8.7
           if (-not (Test-Path "${{ runner.temp }}/lo-engine.zip")) { throw 'engine zip was not produced' }
           Write-Host ("engine zip: {0:N1} MB" -f ((Get-Item "${{ runner.temp }}/lo-engine.zip").Length / 1MB))
