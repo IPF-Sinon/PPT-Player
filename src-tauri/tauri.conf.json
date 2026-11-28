@@ -27,8 +27,7 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis",
-      "zip"
+      "nsis"
     ],
     "icon": [
       "icons/icon.ico"
