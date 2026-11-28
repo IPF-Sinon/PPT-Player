@@ -35,9 +35,17 @@ jobs:
           key: tauri-rust-${{ hashFiles('src-tauri/Cargo.toml', 'src-tauri/build.rs') }}
           restore-keys: tauri-rust-
 
-      - name: Icon
+      - name: Icon and frontend placeholder
         shell: pwsh
-        run: node scripts/make-tauri-icon.mjs
+        run: |
+          node scripts/make-tauri-icon.mjs
+          # generate_context! reads the frontend dist at compile time and panics when
+          # it is missing. The Rust job does not build the UI, so a placeholder is
+          # written here; the packaging job builds the real one.
+          New-Item -ItemType Directory -Force -Path out/renderer | Out-Null
+          if (-not (Test-Path out/renderer/index.html)) {
+            Set-Content -Path out/renderer/index.html -Value '<!doctype html><title>placeholder</title>'
+          }
 
       - name: cargo test
         working-directory: src-tauri
