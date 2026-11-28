@@ -139,6 +139,42 @@ jobs:
           Write-Host "--- second launch (warm) ---"
           if (Test-Path spike-run2.err) { Get-Content spike-run2.err | Tee-Object -FilePath spike-run.txt -Append }
 
+      # The Tauri number means nothing on its own. This builds and measures the current
+      # Electron app the same way on the same machine, which is the only comparison that
+      # answers "is switching worth it".
+      - name: Build the Electron baseline
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Measure Electron for comparison
+        shell: pwsh
+        run: |
+          Write-Host "::group::electron baseline"
+          $env:ELECTRON_DISABLE_SECURITY_WARNINGS = "true"
+          $main = Resolve-Path "out/main/index.js"
+          $start = Get-Date
+          $proc = Start-Process -FilePath "node_modules/electron/dist/electron.exe" -ArgumentList $main -PassThru
+          # Poll for the first window rather than sleeping: that is the moment a user
+          # would see something appear.
+          $firstWindow = $null
+          $deadline = (Get-Date).AddSeconds(40)
+          while ((Get-Date) -lt $deadline) {
+            $proc.Refresh()
+            try {
+              if ($proc.MainWindowHandle -ne 0) { $firstWindow = ((Get-Date) - $start).TotalMilliseconds; break }
+            } catch { }
+            Start-Sleep -Milliseconds 100
+          }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          if ($null -eq $firstWindow) {
+            Write-Host "::warning::electron window never appeared"
+          } else {
+            Write-Host ("ELECTRON_WINDOW_MS={0:N0}" -f $firstWindow)
+            ("ELECTRON_WINDOW_MS={0:N0}" -f $firstWindow) | Tee-Object -FilePath spike-size.txt -Append
+          }
+          Write-Host "::endgroup::"
+
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: tauri-spike
