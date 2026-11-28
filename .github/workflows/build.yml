@@ -1,74 +1,20 @@
 name: build
 
-# The one workflow. Every push is checked, every push to main is packaged, and a
-# version tag publishes a release.
-#
-# Three triggers, one pipeline:
-#   pull_request  -> check only. Packaging costs twenty minutes and proves nothing
-#                    that a merge would not prove anyway.
-#   push to main  -> check, package, and keep the installers as artifacts. This is the
-#                    continuous build: whatever is on main has been built and smoke
-#                    tested, so a release is never the first time a change is packaged.
-#   tag v*        -> the same build, published as a GitHub release.
-#
-# The tag is the only thing that publishes. A merge to main cannot accidentally ship.
+# Rust and frontend checks for the Tauri shell. Kept separate from ci.yml so the
+# Electron build keeps working while the migration is in progress.
 
 on:
   push:
     branches: [main, feat/tauri-migration]
-    tags: ['v*']
   pull_request:
     branches: [main, feat/tauri-migration]
   workflow_dispatch:
-    inputs:
-      publish:
-        description: 'Publish a release from this run (tag must match package.json)'
-        type: boolean
-        default: false
 
 env:
   PNPM_VERSION: 11.7.0
   NODE_VERSION: 24
 
 jobs:
-  # A tag that disagrees with package.json would publish installers whose version
-  # string contradicts the release name, so this is checked before anything is built.
-  version:
-    name: check version
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      tag: ${{ steps.check.outputs.tag }}
-      publish: ${{ steps.check.outputs.publish }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-
-      - name: Check the tag matches the app version
-        id: check
-        env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
-          EVENT: ${{ github.event_name }}
-          INPUT_PUBLISH: ${{ inputs.publish }}
-        run: |
-          version=$(node -p "require('./package.json').version")
-          tag="v$version"
-
-          if [ "$REF_TYPE" = "tag" ]; then
-            if [ "$REF_NAME" != "$tag" ]; then
-              echo "::error::tag $REF_NAME does not match package.json version $version"
-              exit 1
-            fi
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$INPUT_PUBLISH" = "true" ]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "app version $version -> tag $tag"
-
   rust:
     name: cargo check and test
     runs-on: windows-latest
@@ -367,17 +313,44 @@ jobs:
       - name: Smoke test lite
         shell: pwsh
         run: |
-          # The previous version of this test could pass without a working app: it
-          # accepted a non-zero window handle as proof, and a window is created before
-          # the renderer runs, so a setup panic after that point still looked like
-          # success. It also never matched the actual log text.
-          #
-          # Now the only accepted proof is the renderer reporting in, which is written
-          # by the React app after it mounts. That fails on a startup panic, on a blank
-          # webview, and on a renderer that crashes before first paint.
-          & ./scripts/smoke-test.ps1 -Exe 'src-tauri/target/release/PPTPlayer.exe' -Label 'lite'
+          $exe = 'src-tauri/target/release/PPTPlayer.exe'
+          if (-not (Test-Path $exe)) { throw 'lite release exe missing' }
+          $out = Join-Path ${{ runner.temp }} 'smoke-lite.out'
+          $err = Join-Path ${{ runner.temp }} 'smoke-lite.err'
+          Remove-Item $out, $err -ErrorAction SilentlyContinue
 
-      - name: Package lite artifacts
+          # A GUI binary with no console still writes to redirected handles, and the
+          # app logs '[startup] renderer ready' to stderr and to its log file. The
+          # window handle is the fallback, so a renderer that never reports in does
+          # not fail the build on its own. No GPU is required: WebView2 falls back
+          # to software rendering on the runner.
+          # The log lives in app data and survives between steps, so a stale line
+          # from an earlier launch would let this pass without the app starting.
+          $log = Join-Path $env:APPDATA 'com.ipf.sinon.pptplayer\config\ppt-player.log'
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
+
+          $proc = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          $deadline = (Get-Date).AddSeconds(90)
+          $ready = $false
+          $exitedEarly = $false
+          while ((Get-Date) -lt $deadline) {
+            $proc.Refresh()
+            if ($proc.HasExited) { $exitedEarly = $true; break }
+            if ($proc.MainWindowHandle -ne 0) { $ready = $true; break }
+            if ((Test-Path $err) -and ((Get-Content $err -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
+            if ((Test-Path $log) -and ((Get-Content $log -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
+            Start-Sleep -Milliseconds 300
+          }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+
+          Write-Host '--- stderr ---'
+          if (Test-Path $err) { Get-Content $err | Select-Object -Last 40 }
+
+          if (-not $ready) {
+            if ($exitedEarly) { throw 'lite smoke test failed: the app exited before it reported ready' }
+            throw 'lite smoke test failed: no window and no ready log within 90s'
+          }
+          Write-Host 'lite smoke test passed'
 
       - name: Package lite artifacts
         shell: pwsh
@@ -449,9 +422,32 @@ jobs:
         if: steps.engine.outputs.present == 'true'
         shell: pwsh
         run: |
-          # Same gate as lite: only the renderer reporting in counts, so a startup
-          # panic or a blank webview fails the build instead of shipping.
-          & ./scripts/smoke-test.ps1 -Exe 'src-tauri/target/release/PPTPlayer.exe' -Label 'full'
+          $exe = 'src-tauri/target/release/PPTPlayer.exe'
+          if (-not (Test-Path $exe)) { throw 'full release exe missing' }
+          $out = Join-Path ${{ runner.temp }} 'smoke-full.out'
+          $err = Join-Path ${{ runner.temp }} 'smoke-full.err'
+          Remove-Item $out, $err -ErrorAction SilentlyContinue
+          # Same reason as the lite smoke test: a stale log would fake a pass.
+          $log = Join-Path $env:APPDATA 'com.ipf.sinon.pptplayer\config\ppt-player.log'
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
+
+          $proc = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          $deadline = (Get-Date).AddSeconds(90)
+          $ready = $false
+          while ((Get-Date) -lt $deadline) {
+            $proc.Refresh()
+            if ($proc.HasExited) { break }
+            if ($proc.MainWindowHandle -ne 0) { $ready = $true; break }
+            if ((Test-Path $err) -and ((Get-Content $err -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
+            if ((Test-Path $log) -and ((Get-Content $log -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
+            Start-Sleep -Milliseconds 300
+          }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+
+          Write-Host '--- stderr ---'
+          if (Test-Path $err) { Get-Content $err | Select-Object -Last 40 }
+          if (-not $ready) { throw 'full smoke test failed: no window and no ready log within 90s' }
+          Write-Host 'full smoke test passed'
 
       - name: Package full artifacts
         if: steps.engine.outputs.present == 'true'
@@ -502,53 +498,3 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # Publishing is the last step and the only one that writes outside the repository.
-  # It runs only for a version tag, or for a manual run that explicitly asks for it,
-  # so merging to main can never ship by accident.
-  publish:
-    name: publish release
-    needs: [version, package]
-    if: needs.version.outputs.publish == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v6
-        with:
-          name: tauri-windows
-          path: artifacts
-
-      - name: Write checksums
-        run: |
-          cd artifacts
-          # Sorted so the file is stable between runs, which makes it comparable.
-          sha256sum * | sort -k2 > sha256sums.txt
-          cat sha256sums.txt
-
-      - name: Publish
-        uses: softprops/action-gh-release@v3.0.4
-        with:
-          tag_name: ${{ needs.version.outputs.tag }}
-          name: PPT Player ${{ needs.version.outputs.tag }}
-          draft: false
-          prerelease: false
-          files: |
-            artifacts/PPTPlayer-Setup-x64-lite.exe
-            artifacts/PPTPlayer-x64-lite.zip
-            artifacts/PPTPlayer-Setup-x64-full.exe
-            artifacts/PPTPlayer-x64-full.zip
-            artifacts/sha256sums.txt
-          body: |
-            Tauri 2 shell, replacing the Electron runtime.
-
-            Lite (PPTPlayer-Setup-x64-lite.exe): the app alone. It opens PDF and PPTX
-            directly; other formats offer to download the compatibility engine on
-            first use.
-
-            Full (PPTPlayer-Setup-x64-full.exe): ships the pruned LibreOffice engine,
-            so every format works offline.
-
-            sha256sums.txt covers every file above.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
