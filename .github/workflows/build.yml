@@ -357,10 +357,15 @@ jobs:
       - name: Keep the engine out of the lite build
         shell: pwsh
         run: |
+          # Moved outside the repository entirely. An earlier attempt moved it to
+          # resources/lo-full, which is still inside the bundle's resource root, and the
+          # lite installer stayed at 89 MB — whatever Tauri reads, it is not restricted
+          # to the exact path in the config.
           if (Test-Path 'resources/lo') {
-            if (Test-Path 'resources/lo-full') { Remove-Item -Recurse -Force 'resources/lo-full' }
-            Move-Item -Path 'resources/lo' -Destination 'resources/lo-full'
-            Write-Host 'engine moved aside for the lite build'
+            $park = Join-Path ${{ runner.temp }} 'lo-parked'
+            if (Test-Path $park) { Remove-Item -Recurse -Force $park }
+            Move-Item -Path 'resources/lo' -Destination $park
+            Write-Host ('engine parked at ' + $park)
           }
           # The tree is moved, but a cargo cache restore can leave an engine beside the
           # binary as well, and NSIS packs that too. Sweep every place it can hide and
@@ -468,9 +473,10 @@ jobs:
         shell: pwsh
         run: |
           # Put back the engine the lite build was kept away from.
-          if (Test-Path 'resources/lo-full') {
+          $park = Join-Path ${{ runner.temp }} 'lo-parked'
+          if (Test-Path $park) {
             if (Test-Path 'resources/lo') { Remove-Item -Recurse -Force 'resources/lo' }
-            Move-Item -Path 'resources/lo-full' -Destination 'resources/lo'
+            Move-Item -Path $park -Destination 'resources/lo'
             Write-Host 'engine restored for the full build'
           }
           # Both variants produce PPTPlayer_<version>_x64-setup.exe, so the lite
