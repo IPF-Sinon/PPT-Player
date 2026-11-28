@@ -1,4 +1,4 @@
-name: build
+name: ci2
 
 # The one workflow. Every push is checked, every push to main is packaged, and a
 # version tag publishes a release.
