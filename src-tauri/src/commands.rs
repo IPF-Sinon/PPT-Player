@@ -32,6 +32,18 @@ impl AppState {
             native_decks: Mutex::new(std::collections::HashMap::new()),
         }
     }
+
+    /// Whether a deck path was passed on the command line and is still unclaimed.
+    ///
+    /// Startup reads this to decide whether a launch that asked to stay hidden still
+    /// has to show a window: the shell only passes a path because the user asked for
+    /// that file, and opening it into a hidden window looks like nothing happened.
+    pub fn has_pending_open(&self) -> bool {
+        self.pending_open_path
+            .lock()
+            .map(|slot| slot.is_some())
+            .unwrap_or(false)
+    }
 }
 
 fn err(code: &str, message: impl Into<String>) -> AppErrorPayload {
@@ -392,3 +404,72 @@ pub fn report_ready(app: AppHandle) -> Result<(), String> {
     let _ = app.emit("app:ready", ());
     Ok(())
 }
+
+// ------------------------------------------------------------------ startup
+
+/// Whether the app is registered to start with the system.
+///
+/// The registration is the source of truth, not the settings file: the user can turn
+/// the entry off in Task Manager, and a checkbox that then still reads "on" would be
+/// lying about the machine it is running on.
+#[tauri::command]
+pub fn get_autostart(app: AppHandle) -> bool {
+    autostart_enabled(&app)
+}
+
+/// Register or unregister the login entry, returning the state that is now in effect.
+///
+/// Returning the observed state rather than the requested one means a refused write
+/// (a locked-down machine, a policy block) shows up in the UI as a checkbox that did
+/// not move, instead of one that claims a preload that will never happen.
+///
+/// The same value is mirrored into settings, because settings is what the settings UI
+/// reads back at startup: the registration alone would leave that checkbox showing
+/// whatever was last saved, which is a different answer after the user edits the entry
+/// in Task Manager.
+#[tauri::command]
+pub fn set_autostart(app: AppHandle, enabled: bool) -> bool {
+    set_autostart_state(&app, enabled)
+}
+
+/// Write the registration, mirror the result into settings, and report what took.
+///
+/// Shared by the command and the tray checkbox so the two cannot disagree: whichever
+/// one flips the switch, the settings file the UI reads at startup ends up carrying the
+/// state that is actually registered.
+pub fn set_autostart_state(app: &AppHandle, enabled: bool) -> bool {
+    if let Err(err) = apply_autostart(app, enabled) {
+        crate::logln!("[autostart] could not set {enabled}: {err}");
+    }
+    let actual = autostart_enabled(app);
+    settings::save(
+        app,
+        SettingsPatch {
+            autostart: Some(actual),
+            ..Default::default()
+        },
+    );
+    crate::logln!("[autostart] requested {enabled}, now {actual}");
+    actual
+}
+
+/// Read the autostart registration. An unavailable plugin reads as "off".
+pub fn autostart_enabled(app: &AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+/// Write the autostart registration.
+///
+/// The error is returned rather than swallowed so both callers can decide: the command
+/// logs it and reports the real state, the tray logs it and re-syncs its tick.
+pub fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(|e| e.to_string())
+    } else {
+        manager.disable().map_err(|e| e.to_string())
+    }
+}
+
