@@ -363,44 +363,10 @@ jobs:
       - name: Smoke test lite
         shell: pwsh
         run: |
-          $exe = 'src-tauri/target/release/PPTPlayer.exe'
-          if (-not (Test-Path $exe)) { throw 'lite release exe missing' }
-          $out = Join-Path ${{ runner.temp }} 'smoke-lite.out'
-          $err = Join-Path ${{ runner.temp }} 'smoke-lite.err'
-          Remove-Item $out, $err -ErrorAction SilentlyContinue
-
-          # A GUI binary with no console still writes to redirected handles, and the
-          # app logs '[startup] renderer ready' to stderr and to its log file. The
-          # window handle is the fallback, so a renderer that never reports in does
-          # not fail the build on its own. No GPU is required: WebView2 falls back
-          # to software rendering on the runner.
-          # The log lives in app data and survives between steps, so a stale line
-          # from an earlier launch would let this pass without the app starting.
-          $log = Join-Path $env:APPDATA 'com.ipf.sinon.pptplayer\config\ppt-player.log'
-          Remove-Item $log -Force -ErrorAction SilentlyContinue
-
-          $proc = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-          $deadline = (Get-Date).AddSeconds(90)
-          $ready = $false
-          $exitedEarly = $false
-          while ((Get-Date) -lt $deadline) {
-            $proc.Refresh()
-            if ($proc.HasExited) { $exitedEarly = $true; break }
-            if ($proc.MainWindowHandle -ne 0) { $ready = $true; break }
-            if ((Test-Path $err) -and ((Get-Content $err -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
-            if ((Test-Path $log) -and ((Get-Content $log -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
-            Start-Sleep -Milliseconds 300
-          }
-          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
-
-          Write-Host '--- stderr ---'
-          if (Test-Path $err) { Get-Content $err | Select-Object -Last 40 }
-
-          if (-not $ready) {
-            if ($exitedEarly) { throw 'lite smoke test failed: the app exited before it reported ready' }
-            throw 'lite smoke test failed: no window and no ready log within 90s'
-          }
-          Write-Host 'lite smoke test passed'
+          # The renderer reporting in is the only accepted proof: a window exists
+          # before the renderer runs, so a build that panics during setup still has
+          # one for a moment and would otherwise look like a pass.
+          & ./scripts/smoke-test.ps1 -Exe 'src-tauri/target/release/PPTPlayer.exe' -Label 'lite'
 
       - name: Package lite artifacts
         shell: pwsh
@@ -472,32 +438,9 @@ jobs:
         if: steps.engine.outputs.present == 'true'
         shell: pwsh
         run: |
-          $exe = 'src-tauri/target/release/PPTPlayer.exe'
-          if (-not (Test-Path $exe)) { throw 'full release exe missing' }
-          $out = Join-Path ${{ runner.temp }} 'smoke-full.out'
-          $err = Join-Path ${{ runner.temp }} 'smoke-full.err'
-          Remove-Item $out, $err -ErrorAction SilentlyContinue
-          # Same reason as the lite smoke test: a stale log would fake a pass.
-          $log = Join-Path $env:APPDATA 'com.ipf.sinon.pptplayer\config\ppt-player.log'
-          Remove-Item $log -Force -ErrorAction SilentlyContinue
-
-          $proc = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-          $deadline = (Get-Date).AddSeconds(90)
-          $ready = $false
-          while ((Get-Date) -lt $deadline) {
-            $proc.Refresh()
-            if ($proc.HasExited) { break }
-            if ($proc.MainWindowHandle -ne 0) { $ready = $true; break }
-            if ((Test-Path $err) -and ((Get-Content $err -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
-            if ((Test-Path $log) -and ((Get-Content $log -Raw -ErrorAction SilentlyContinue) -match 'renderer ready')) { $ready = $true; break }
-            Start-Sleep -Milliseconds 300
-          }
-          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
-
-          Write-Host '--- stderr ---'
-          if (Test-Path $err) { Get-Content $err | Select-Object -Last 40 }
-          if (-not $ready) { throw 'full smoke test failed: no window and no ready log within 90s' }
-          Write-Host 'full smoke test passed'
+          # Same gate as lite: only the renderer reporting in counts. Accepting a
+          # window handle let a build that panics during setup look like a pass.
+          & ./scripts/smoke-test.ps1 -Exe 'src-tauri/target/release/PPTPlayer.exe' -Label 'full'
 
       - name: Package full artifacts
         if: steps.engine.outputs.present == 'true'
@@ -529,6 +472,21 @@ jobs:
           Get-ChildItem -Path artifacts -File | ForEach-Object {
             ('- ' + $_.Name + ' (' + [math]::Round($_.Length / 1MB, 1) + ' MB)') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           }
+
+      # The lite build has no engine, so the release has to carry one: without this
+      # a lite user has nothing to download when the app offers to fetch it.
+      - name: Add the engine zip
+        shell: pwsh
+        run: |
+          $zip = Join-Path ${{ runner.temp }} 'lo-engine.zip'
+          if (-not (Test-Path $zip)) {
+            Write-Host '::warning::no engine zip to publish; the lite build will have no download source'
+            exit 0
+          }
+          $version = (Get-Content resources/engine.json -Raw | ConvertFrom-Json).version
+          $target = "artifacts/PPTPlayer-Engine-$version-win-x64.zip"
+          Copy-Item $zip $target -Force
+          Write-Host ('engine package: {0} MB' -f [math]::Round((Get-Item $target).Length / 1MB, 1))
 
       - uses: actions/upload-artifact@v7.0.2
         with:
@@ -568,6 +526,7 @@ jobs:
       - name: Write checksums
         run: |
           cd artifacts
+          ls -la
           # Sorted so the file is stable between runs, which makes it comparable.
           sha256sum * | sort -k2 > sha256sums.txt
           cat sha256sums.txt
@@ -579,11 +538,15 @@ jobs:
           name: PPT Player ${{ needs.version.outputs.tag }}
           draft: false
           prerelease: false
+          # The full installer is conditional: it needs the engine tree, and a run
+          # without it must still publish the lite build rather than fail here.
+          fail_on_unmatched_files: false
           files: |
             artifacts/PPTPlayer-Setup-x64-lite.exe
             artifacts/PPTPlayer-x64-lite.zip
             artifacts/PPTPlayer-Setup-x64-full.exe
             artifacts/PPTPlayer-x64-full.zip
+            artifacts/PPTPlayer-Engine-*.zip
             artifacts/sha256sums.txt
           body: |
             Tauri 2 shell, replacing the Electron runtime.
